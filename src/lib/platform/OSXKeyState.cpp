@@ -17,6 +17,7 @@
  */
 
 #include "platform/OSXKeyState.h"
+#include "platform/OSXInputSourceSelection.h"
 #include "platform/OSXUchrKeyResource.h"
 #include "platform/OSXMediaKeySupport.h"
 #include "arch/Arch.h"
@@ -78,6 +79,28 @@ public:
     KeyID                m_keyID;
     std::uint32_t m_virtualKey;
 };
+
+// Read-only Gureum preference lookup. Never writes settings. A missing key,
+// a non-string value, or an empty string yields "" and must not crash.
+static std::string readGureumPreference(CFStringRef key)
+{
+    CFStringRef appId = CFSTR("org.youknowone.Gureum");
+    CFPropertyListRef value = CFPreferencesCopyValue(
+        key, appId, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    if (value == nullptr) {
+        return "";
+    }
+    std::string result;
+    if (CFGetTypeID(value) == CFStringGetTypeID()) {
+        char buffer[512];
+        if (CFStringGetCString(static_cast<CFStringRef>(value), buffer,
+                               sizeof(buffer), kCFStringEncodingUTF8)) {
+            result = buffer;
+        }
+    }
+    CFRelease(value);
+    return result;
+}
 static const KeyEntry    s_controlKeys[] = {
     // cursor keys.  if we don't do this we'll may still get these from
     // the keyboard resource but they may not correspond to the arrow
@@ -1016,14 +1039,6 @@ void OSXKeyState::setGroup(std::int32_t group)
 
 bool OSXKeyState::cycleInputSource(std::int32_t offset)
 {
-    const std::string abcId = "com.apple.keylayout.ABC";
-    const std::string gureumRomanId =
-        "org.youknowone.inputmethod.Gureum.system";
-    const std::string gureumHangulId =
-        "org.youknowone.inputmethod.Gureum.han2";
-    const std::string appleKoreanId =
-        "com.apple.inputmethod.Korean.2SetKorean";
-
     CFStringRef keys[] = { kTISPropertyInputSourceCategory };
     CFStringRef values[] = { kTISCategoryKeyboardInputSource };
     CFDictionaryRef filter = CFDictionaryCreate(
@@ -1034,6 +1049,15 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset)
     });
     CFRelease(filter);
 
+    if (sources == nullptr) {
+        LOG_WARN("could not enumerate macOS input sources");
+        return false;
+    }
+
+    // Full candidate list (with enabled/selectable flags) for the pure
+    // policy helper; TIS refs are kept separately for the single final
+    // TISSelectInputSource call.
+    std::vector<OSXInputSourceCandidate> candidates;
     std::vector<TISInputSourceRef> selectableSources;
     const CFIndex count = CFArrayGetCount(sources);
     for (CFIndex i = 0; i < count; ++i) {
@@ -1050,13 +1074,16 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset)
                 selectCapable == kCFBooleanTrue,
                 enabled == kCFBooleanTrue);
         });
+        const std::string sourceId = getInputSourceString(
+            source, kTISPropertyInputSourceID);
+        candidates.push_back(
+            OSXInputSourceCandidate{sourceId, sourceFlags.second, sourceFlags.first});
         if (sourceFlags.first && sourceFlags.second) {
             selectableSources.push_back(source);
         }
 
         LOG_DEBUG1("macOS input source candidate id=%s selectable=%s enabled=%s",
-                   getInputSourceString(
-                       source, kTISPropertyInputSourceID).c_str(),
+                   sourceId.c_str(),
                    sourceFlags.first ? "yes" : "no",
                    sourceFlags.second ? "yes" : "no");
     }
@@ -1072,72 +1099,60 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset)
     });
     const std::string currentId = getInputSourceString(
         current, kTISPropertyInputSourceID);
-    std::int32_t currentIndex = 0;
-    for (std::int32_t i = 0;
-         i < static_cast<std::int32_t>(selectableSources.size()); ++i) {
-        if (getInputSourceString(selectableSources[i],
-                                 kTISPropertyInputSourceID) == currentId) {
-            currentIndex = i;
+
+    // Read-only Gureum preferences. Missing keys, non-string values, and
+    // empty strings all degrade to "" (historical fallback order). No writes.
+    const std::string preferredRomanId =
+        readGureumPreference(CFSTR("LastRomanInputMode"));
+    const std::string preferredHangulId =
+        readGureumPreference(CFSTR("LastHangulInputMode"));
+    LOG_DEBUG1("Gureum preferences roman=%s hangul=%s",
+               preferredRomanId.empty() ? "<empty>" : preferredRomanId.c_str(),
+               preferredHangulId.empty() ? "<empty>" : preferredHangulId.c_str());
+
+    // Pure policy: no TIS/CF/sleep/event calls inside.
+    const OSXInputSourceSelection selection = PickOSXInputSourceTarget(
+        candidates, currentId, preferredRomanId, preferredHangulId, offset);
+    if (selection.m_targetId.empty()) {
+        LOG_WARN("no macOS input source target reason=%s", selection.m_reason.c_str());
+        if (current != nullptr) {
+            CFRelease(current);
+        }
+        CFRelease(sources);
+        return false;
+    }
+
+    TISInputSourceRef target = nullptr;
+    for (TISInputSourceRef source : selectableSources) {
+        if (getInputSourceString(source, kTISPropertyInputSourceID) ==
+            selection.m_targetId) {
+            target = source;
             break;
         }
     }
-
-    // Historical source preference. It differs from Gureum's configurable
-    // last Roman mode and is not proof of correct composition finalization.
-    // Keep the selection policy unchanged pending isolated IME validation.
-    TISInputSourceRef target = nullptr;
-    if (offset == 1) {
-        if (currentId == gureumHangulId || currentId == appleKoreanId) {
-            for (const std::string& desiredId : {gureumRomanId, abcId}) {
-                for (TISInputSourceRef source : selectableSources) {
-                    if (getInputSourceString(source, kTISPropertyInputSourceID) ==
-                        desiredId) {
-                        target = source;
-                        break;
-                    }
-                }
-                if (target != nullptr) {
-                    break;
-                }
-            }
-        }
-        else {
-            for (const std::string& desiredId : {gureumHangulId, appleKoreanId}) {
-                for (TISInputSourceRef source : selectableSources) {
-                    if (getInputSourceString(source, kTISPropertyInputSourceID) ==
-                        desiredId) {
-                        target = source;
-                        break;
-                    }
-                }
-                if (target != nullptr) {
-                    break;
-                }
-            }
-        }
-        if (target != nullptr) {
-            LOG_DEBUG1("selecting deterministic macOS input source current=%s target=%s",
-                       currentId.c_str(),
-                       getInputSourceString(target, kTISPropertyInputSourceID).c_str());
-        }
-    }
-
     if (target == nullptr) {
-        const std::int32_t sourceCount =
-            static_cast<std::int32_t>(selectableSources.size());
-        const std::int32_t targetIndex =
-            ((currentIndex + offset) % sourceCount + sourceCount) % sourceCount;
-        target = selectableSources[targetIndex];
+        // Defensive: the pure helper only returns enabled+selectable IDs, so
+        // this path is unreachable unless enumeration raced. Do not chain to
+        // another source and do not write settings.
+        LOG_WARN("macOS input source target not selectable target=%s reason=%s",
+                 selection.m_targetId.c_str(), selection.m_reason.c_str());
+        if (current != nullptr) {
+            CFRelease(current);
+        }
+        CFRelease(sources);
+        return false;
     }
-    const std::string targetId = getInputSourceString(
-        target, kTISPropertyInputSourceID);
+    const std::string targetId = selection.m_targetId;
+    LOG_DEBUG1("selecting macOS input source current=%s target=%s reason=%s",
+               currentId.c_str(), targetId.c_str(), selection.m_reason.c_str());
+    // Exactly one selection call on the final target.
     const OSStatus status = runOnMainThread([&]() {
         return TISSelectInputSource(target);
     });
 
-    LOG_DEBUG1("cycle macOS input source offset=%+d current=%s target=%s status=%d",
+    LOG_DEBUG1("cycle macOS input source offset=%+d current=%s target=%s status=%d reason=%s",
                offset, currentId.c_str(), targetId.c_str(),
-               static_cast<int>(status));
+               static_cast<int>(status), selection.m_reason.c_str());
 
     if (current != nullptr) {
         CFRelease(current);
@@ -1145,6 +1160,7 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset)
     CFRelease(sources);
 
     if (status != noErr) {
+        // Selection failure returns without chaining or settings writes.
         return false;
     }
 
