@@ -128,7 +128,7 @@ private:
     void setGroup(std::int32_t group);
 
     // Cycle through enabled, selectable macOS input sources.
-    bool cycleInputSource(std::int32_t offset);
+    bool cycleInputSource(std::int32_t offset, bool reselectHangul = false);
 
     // Check if the keyboard layout has changed and update keyboard state
     // if so.

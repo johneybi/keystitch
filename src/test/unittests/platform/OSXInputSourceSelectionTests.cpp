@@ -48,6 +48,34 @@ std::vector<OSXInputSourceCandidate> fullSet()
 
 } // namespace
 
+TEST(OSXInputSourceSelection, experimentalReselectAlwaysRequestsHan2)
+{
+    for (int i = 0; i < 10; ++i) {
+        auto selection = PickOSXHangulReselectTarget(fullSet());
+        EXPECT_EQ(kHan2, selection.m_targetId);
+        EXPECT_EQ("experiment-explicit-han2-reselection", selection.m_reason);
+    }
+}
+
+TEST(OSXInputSourceSelection, experimentalReselectNeverFallsBackOrEnables)
+{
+    for (const auto& candidates : std::vector<std::vector<OSXInputSourceCandidate>>{
+            {}, {on(kAbc), on(kAppleKorean)},
+            {{kHan2, false, true}, on(kAbc)},
+            {{kHan2, true, false}, on(kSystem)},
+            {on(kHan390), on(kQwerty)}}) {
+        auto selection = PickOSXHangulReselectTarget(candidates);
+        EXPECT_TRUE(selection.m_targetId.empty());
+        EXPECT_EQ("experiment-han2-unavailable-no-fallback", selection.m_reason);
+    }
+}
+
+TEST(OSXInputSourceSelection, experimentalReselectSkipsDisabledDuplicate)
+{
+    EXPECT_EQ(kHan2, PickOSXHangulReselectTarget(
+        {{kHan2, false, true}, on(kHan2)}).m_targetId);
+}
+
 TEST(OSXInputSourceSelection, qwertyPreferenceBeatsSystemAndAbc)
 {
     auto s = PickOSXInputSourceTarget(fullSet(), kHan2, kQwerty, kHan2, 1);
