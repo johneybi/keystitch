@@ -708,19 +708,20 @@ OSXKeyState::fakeKey(const Keystroke& keystroke)
             "  button=0x%04x virtualKey=0x%04x keyDown=%s",
             button, virtualKey, keyDown ? "down" : "up");
 
-        // Experiment: F19 requests han2 even if it is already selected.
-        // This is NOT a toggle and is not equivalent to a menu/IMK callback.
-        // Observing the selected source does not confirm that the foreground
-        // application's composition or input-method session has switched.
+        // F19 is the semantic target for the Windows Right Alt tap. Select
+        // the opposite language family through the generic policy below:
+        // Hangul -> Roman and Roman -> Hangul. Do not hard-code a Gureum mode
+        // here; Apple Korean/ABC are the supported baseline and Gureum is an
+        // optional compatible target.
         if (virtualKey == kVK_F19) {
             if (keyDown && !repeat) {
-                if (cycleInputSource(1, true)) {
-                    LOG_INFO("F19 experiment: requested Gureum han2 reselection (foreground IME state unverified)");
+                if (cycleInputSource(1)) {
+                    LOG_INFO("F19 requested bidirectional macOS input-source switch (foreground IME state unverified)");
                     // Historical settling interval, not an IME acknowledgement.
                     this_thread_sleep(0.075);
                 }
                 else {
-                    LOG_WARN("F19 experiment: han2 reselection failed; no fallback attempted");
+                    LOG_WARN("F19 failed to switch macOS input source");
                 }
             }
             break;
@@ -1038,7 +1039,7 @@ void OSXKeyState::setGroup(std::int32_t group)
                group, targetId.c_str());
 }
 
-bool OSXKeyState::cycleInputSource(std::int32_t offset, bool reselectHangul)
+bool OSXKeyState::cycleInputSource(std::int32_t offset)
 {
     CFStringRef keys[] = { kTISPropertyInputSourceCategory };
     CFStringRef values[] = { kTISCategoryKeyboardInputSource };
@@ -1112,10 +1113,8 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset, bool reselectHangul)
                preferredHangulId.empty() ? "<empty>" : preferredHangulId.c_str());
 
     // Pure policy: no TIS/CF/sleep/event calls inside.
-    const OSXInputSourceSelection selection = reselectHangul
-        ? PickOSXHangulReselectTarget(candidates)
-        : PickOSXInputSourceTarget(
-            candidates, currentId, preferredRomanId, preferredHangulId, offset);
+    const OSXInputSourceSelection selection = PickOSXInputSourceTarget(
+        candidates, currentId, preferredRomanId, preferredHangulId, offset);
     if (selection.m_targetId.empty()) {
         LOG_WARN("no macOS input source target reason=%s", selection.m_reason.c_str());
         if (current != nullptr) {

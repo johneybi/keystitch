@@ -48,34 +48,6 @@ std::vector<OSXInputSourceCandidate> fullSet()
 
 } // namespace
 
-TEST(OSXInputSourceSelection, experimentalReselectAlwaysRequestsHan2)
-{
-    for (int i = 0; i < 10; ++i) {
-        auto selection = PickOSXHangulReselectTarget(fullSet());
-        EXPECT_EQ(kHan2, selection.m_targetId);
-        EXPECT_EQ("experiment-explicit-han2-reselection", selection.m_reason);
-    }
-}
-
-TEST(OSXInputSourceSelection, experimentalReselectNeverFallsBackOrEnables)
-{
-    for (const auto& candidates : std::vector<std::vector<OSXInputSourceCandidate>>{
-            {}, {on(kAbc), on(kAppleKorean)},
-            {{kHan2, false, true}, on(kAbc)},
-            {{kHan2, true, false}, on(kSystem)},
-            {on(kHan390), on(kQwerty)}}) {
-        auto selection = PickOSXHangulReselectTarget(candidates);
-        EXPECT_TRUE(selection.m_targetId.empty());
-        EXPECT_EQ("experiment-han2-unavailable-no-fallback", selection.m_reason);
-    }
-}
-
-TEST(OSXInputSourceSelection, experimentalReselectSkipsDisabledDuplicate)
-{
-    EXPECT_EQ(kHan2, PickOSXHangulReselectTarget(
-        {{kHan2, false, true}, on(kHan2)}).m_targetId);
-}
-
 TEST(OSXInputSourceSelection, qwertyPreferenceBeatsSystemAndAbc)
 {
     auto s = PickOSXInputSourceTarget(fullSet(), kHan2, kQwerty, kHan2, 1);
@@ -242,6 +214,21 @@ TEST(OSXInputSourceSelection, forwardAndReverseRegression)
     auto rev = PickOSXInputSourceTarget(c, kHan2, kQwerty, kHan2, -1);
     EXPECT_EQ(kAbc, rev.m_targetId);
     EXPECT_NE(std::string::npos, rev.m_reason.find("reverse-cycle"));
+}
+
+TEST(OSXInputSourceSelection, AppleSourcesSwitchBothDirections)
+{
+    const std::vector<OSXInputSourceCandidate> c = {
+        on(kAbc), on(kAppleKorean),
+    };
+
+    auto toHangul = PickOSXInputSourceTarget(c, kAbc, "", "", 1);
+    EXPECT_EQ(kAppleKorean, toHangul.m_targetId);
+    EXPECT_NE(std::string::npos, toHangul.m_reason.find("hangul"));
+
+    auto toRoman = PickOSXInputSourceTarget(c, kAppleKorean, "", "", 1);
+    EXPECT_EQ(kAbc, toRoman.m_targetId);
+    EXPECT_NE(std::string::npos, toRoman.m_reason.find("roman"));
 }
 
 TEST(OSXInputSourceSelection, exactMatchNotPrefix)

@@ -42,10 +42,6 @@ struct OSXInputSourceSelection {
     std::string m_reason;   // diagnosable, never empty
 };
 
-// Experiment: explicitly reselect han2, even if already current. No fallback.
-OSXInputSourceSelection PickOSXHangulReselectTarget(
-    const std::vector<OSXInputSourceCandidate>& candidates);
-
 // Exact IDs (no arbitrary-prefix matching). Gureum IDs are used to validate
 // preferences; the Apple IDs are the historical fallback/classification IDs.
 extern const char* const kOSXAppleRomanABC;

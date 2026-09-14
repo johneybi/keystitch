@@ -22,18 +22,6 @@
 
 namespace inputleap {
 
-OSXInputSourceSelection PickOSXHangulReselectTarget(
-    const std::vector<OSXInputSourceCandidate>& candidates)
-{
-    for (const auto& candidate : candidates) {
-        if (candidate.m_id == "org.youknowone.inputmethod.Gureum.han2" &&
-            candidate.m_enabled && candidate.m_selectable) {
-            return {candidate.m_id, "experiment-explicit-han2-reselection"};
-        }
-    }
-    return {"", "experiment-han2-unavailable-no-fallback"};
-}
-
 const char* const kOSXAppleRomanABC = "com.apple.keylayout.ABC";
 const char* const kOSXAppleKorean = "com.apple.inputmethod.Korean.2SetKorean";
 

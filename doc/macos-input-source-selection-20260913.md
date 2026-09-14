@@ -81,3 +81,9 @@ root cause; it only makes the preference policy explicit and testable.
 
 No composition-finalization claim is made: selecting a source does not prove
 the foreground application's IME session switched.
+
+The Windows Right Alt F19 target uses this same offset == 1 policy. It is
+therefore bidirectional: an Apple Korean source selects a usable Roman source,
+and ABC (or another usable Roman source) selects a usable Hangul source. F19
+does not hard-code Gureum han2 or reselect a Hangul source while already in a
+Roman source. Gureum remains optional; Apple Korean and ABC are the baseline.

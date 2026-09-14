@@ -1,15 +1,18 @@
-# Explicit han2 reselection experiment
+# Superseded: explicit han2 reselection experiment
+
+This document is historical. The one-way F19 behavior described here is
+rejected and is not the product policy on the current development branch.
 
 Branch: codex/ime-hangul-reselect-experiment, based on ad72bf9f.
 
-F19 (the existing Windows Right Alt tap target) now requests exactly
+The old experiment made F19 request exactly
 org.youknowone.inputmethod.Gureum.han2 on each non-repeat down event, including
 when han2 is already current. It is not a toggle. Up and repeat remain consumed.
 If han2 is unavailable there is no fallback, no automatic enablement, and no
 synthetic F19. Use the menu bar to select Roman mode during the experiment.
 Other group-switch requests retain the preference-aware policy.
 
-The purpose is to compare explicit API reselection with the user's successful
+The purpose was to compare explicit API reselection with the user's successful
 mouse menu selection, in the same failed input field. It is not established
 that TIS reselection invokes the same IMK lifecycle or focus changes as a menu
 selection. A successful return/current source ID does not prove input recovery.
@@ -21,7 +24,7 @@ reviewed modifier-side fix and selection diagnostics/preferences commits. This
 is not a byte-minimal experiment against that old binary; note this when
 interpreting results. All connection stability changes are retained.
 
-Validation: build GUI/client/server/tests using one job; run focused tests,
+Historical validation: build GUI/client/server/tests using one job; run focused tests,
 including fixed han2 selection, unavailable/disabled/nonselectable han2 with no
 fallback, and duplicate candidates. Review that the OS adapter does not skip
 the final TISSelectInputSource call when current and target IDs match.
