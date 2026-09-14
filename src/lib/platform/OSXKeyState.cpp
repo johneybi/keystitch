@@ -74,6 +74,36 @@ static std::string getInputSourceString(TISInputSourceRef source, CFStringRef pr
     return buffer;
 }
 
+// A content-free snapshot for diagnosing input-source transitions. The
+// selected input source, its input mode, and the active keyboard layout are
+// separate pieces of state on macOS; a successful TISSelectInputSource call
+// does not by itself prove that the foreground app's IMK session is ready.
+static std::string getCurrentInputSourceState()
+{
+    TISInputSourceRef inputSource = runOnMainThread([]() {
+        return TISCopyCurrentKeyboardInputSource();
+    });
+    TISInputSourceRef keyboardLayout = runOnMainThread([]() {
+        return TISCopyCurrentKeyboardLayoutInputSource();
+    });
+
+    const std::string inputId = getInputSourceString(
+        inputSource, kTISPropertyInputSourceID);
+    const std::string inputMode = getInputSourceString(
+        inputSource, kTISPropertyInputModeID);
+    const std::string layoutId = getInputSourceString(
+        keyboardLayout, kTISPropertyInputSourceID);
+
+    if (inputSource != nullptr) {
+        CFRelease(inputSource);
+    }
+    if (keyboardLayout != nullptr) {
+        CFRelease(keyboardLayout);
+    }
+
+    return "input=" + inputId + " mode=" + inputMode + " layout=" + layoutId;
+}
+
 struct KeyEntry {
 public:
     KeyID                m_keyID;
@@ -715,13 +745,18 @@ OSXKeyState::fakeKey(const Keystroke& keystroke)
         // optional compatible target.
         if (virtualKey == kVK_F19) {
             if (keyDown && !repeat) {
+                LOG_INFO("F19 transition begin modifiers=0x%08x pressedModifiers=%zu state=%s",
+                         static_cast<unsigned int>(getModifierStateAsOSXFlags()),
+                         m_pressedModifiers.size(),
+                         getCurrentInputSourceState().c_str());
                 if (cycleInputSource(1)) {
-                    LOG_INFO("F19 requested bidirectional macOS input-source switch (foreground IME state unverified)");
+                    LOG_INFO("F19 transition selected bidirectional source state=%s (foreground IME state unverified)",
+                             getCurrentInputSourceState().c_str());
                     // Historical settling interval, not an IME acknowledgement.
                     this_thread_sleep(0.075);
                 }
                 else {
-                    LOG_WARN("F19 failed to switch macOS input source");
+                    LOG_WARN("F19 transition failed state=%s", getCurrentInputSourceState().c_str());
                 }
             }
             break;
@@ -1101,6 +1136,7 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset)
     });
     const std::string currentId = getInputSourceString(
         current, kTISPropertyInputSourceID);
+    const std::string stateBefore = getCurrentInputSourceState();
 
     // Read-only Gureum preferences. Missing keys, non-string values, and
     // empty strings all degrade to "" (historical fallback order). No writes.
@@ -1152,9 +1188,10 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset)
         return TISSelectInputSource(target);
     });
 
-    LOG_DEBUG1("cycle macOS input source offset=%+d current=%s target=%s status=%d reason=%s",
+    LOG_DEBUG1("cycle macOS input source offset=%+d current=%s target=%s status=%d reason=%s before=%s afterCall=%s",
                offset, currentId.c_str(), targetId.c_str(),
-               static_cast<int>(status), selection.m_reason.c_str());
+               static_cast<int>(status), selection.m_reason.c_str(),
+               stateBefore.c_str(), getCurrentInputSourceState().c_str());
 
     if (current != nullptr) {
         CFRelease(current);
@@ -1178,12 +1215,15 @@ bool OSXKeyState::cycleInputSource(std::int32_t offset)
             CFRelease(active);
         }
         if (activeId == targetId) {
+            LOG_DEBUG1("macOS input source activated target=%s state=%s",
+                       targetId.c_str(), getCurrentInputSourceState().c_str());
             return true;
         }
         this_thread_sleep(0.025);
     }
 
-    LOG_WARN("macOS input source did not activate target=%s", targetId.c_str());
+    LOG_WARN("macOS input source did not activate target=%s state=%s",
+             targetId.c_str(), getCurrentInputSourceState().c_str());
     return false;
 }
 

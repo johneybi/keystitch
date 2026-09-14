@@ -27,6 +27,32 @@ Those require user-approved live validation after a candidate app is built;
 this change does not install, launch or replace an app and does not modify
 input-source settings.
 
+## Follow-up reproduction — 2026-09-14
+
+After the candidate had appeared to work during ordinary use, the user
+observed a recurrence in a Chrome ChatGPT input field: Windows Right Alt
+changed the macOS menu-bar language indicator, but subsequent real typing was
+English only. Selecting Gureum's Hangul mode directly from the macOS input
+menu in that same field restored Hangul input. This is an observation from the
+user's physical keyboard, not from synthetic test characters.
+
+The existing client log records repeated
+`F19 requested bidirectional macOS input-source switch (foreground IME state
+unverified)` messages around the recurrence. Those records prove receipt of
+the remapped tap and entry into the selection path only; they do not prove
+that the foreground application's IMK session, selected input mode,
+keyboard-layout override, or active composition became ready. A `defaults`
+snapshot of the selected source is not treated as authoritative when it
+disagrees with the user's visible menu state.
+
+The direct-menu path remains a separate comparator: it may change focus or
+composition state in addition to selecting an input source. The recurrence
+therefore does not establish that TIS selection, Gureum, or Chrome alone is
+the cause. The next diagnostic should log only non-content state before and
+after F19: foreground application identity, selected input-source ID and
+input-mode/layout IDs, keyboard-layout override state, modifier/event state,
+and activation confirmation. Do not collect typed text or clipboard data.
+
 ## Verification boundary
 
 Before release, validate actual strings—not the menu-bar label—in native text,
