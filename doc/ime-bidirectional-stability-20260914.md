@@ -53,6 +53,23 @@ after F19: foreground application identity, selected input-source ID and
 input-mode/layout IDs, keyboard-layout override state, modifier/event state,
 and activation confirmation. Do not collect typed text or clipboard data.
 
+### Diagnostic-build result
+
+The diagnostic build was later used during another Chrome recurrence. The log
+shows repeated F19 transitions with `modifiers=0` and `pressedModifiers=0`.
+Each transition reported an active-source change in both directions:
+Gureum `han2` to Apple `ABC`, and Apple `ABC` back to Gureum `han2`. The
+keyboard layout remained Apple `ABC`, and no source-activation failure was
+reported. The client was connected while the user still observed English-only
+typing in the Chrome field.
+
+This narrows the failure boundary: Right Alt delivery, F19 handling, network
+connection, and the selected-source transition are not sufficient to restore
+Chrome input. The remaining leading hypothesis is that the foreground
+Chrome/Gureum IMK session or composition state is stale after the TIS
+transition; direct menu selection may additionally refresh that session or
+focus. No behavioral workaround is accepted from this evidence alone.
+
 ## Verification boundary
 
 Before release, validate actual strings—not the menu-bar label—in native text,
