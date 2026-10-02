@@ -1,0 +1,66 @@
+name: Record-only paired test runner
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/pair-test/**'
+      - 'src/lib/barrier/**'
+      - 'src/lib/base/**'
+      - 'src/lib/io/**'
+      - 'src/lib/arch/**'
+      - 'src/lib/common/**'
+      - '.github/workflows/pair-test.yml'
+  pull_request:
+    paths:
+      - 'tools/pair-test/**'
+      - 'src/lib/barrier/**'
+      - 'src/lib/base/**'
+      - 'src/lib/io/**'
+      - 'src/lib/arch/**'
+      - 'src/lib/common/**'
+      - '.github/workflows/pair-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  local-codec-and-process:
+    name: Record-only / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Configure standalone codec
+        run: cmake -S tools/pair-test -B build-pair -DCMAKE_BUILD_TYPE=Release
+      - name: Build standalone codec
+        run: cmake --build build-pair --config Release --parallel 1
+      - name: Run codec, subprocess and failure tests (Unix)
+        if: runner.os != 'Windows'
+        env:
+          PAIR_CODEC: ${{ github.workspace }}/build-pair/pair-codec
+        run: python -W error::ResourceWarning -m unittest discover -s tools/pair-test -p 'test_*.py' -v
+      - name: Run codec, subprocess and failure tests (Windows)
+        if: runner.os == 'Windows'
+        env:
+          PAIR_CODEC: ${{ github.workspace }}/build-pair/Release/pair-codec.exe
+        run: python -W error::ResourceWarning -m unittest discover -s tools/pair-test -p 'test_*.py' -v
+      - name: Save local two-process smoke report (Unix)
+        if: runner.os != 'Windows'
+        run: python tools/pair-test/pair_test.py run --codec build-pair/pair-codec --output pair-results
+      - name: Save local two-process smoke report (Windows)
+        if: runner.os == 'Windows'
+        run: python tools/pair-test/pair_test.py run --codec build-pair/Release/pair-codec.exe --output pair-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: record-only-${{ matrix.os }}
+          path: pair-results/
+          if-no-files-found: warn

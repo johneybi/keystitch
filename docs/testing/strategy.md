@@ -15,5 +15,26 @@ Windows `Right Alt`/`Hangul`, macOS extended keys, and input-source switching.
 Record the observed baseline and regressions in the existing documents under
 `doc/` rather than relying only on a commit message.
 
+## Isolated paired test foundation
+
+Use the [record-only paired runner](../../tools/pair-test/README.md) in a dedicated
+checkout before interacting with a daily-use build. It pins each host's actual
+native codec and script fingerprints, sends production-format fixture messages
+over TCP in both directions, and gathers one result bundle. Its local CI runs
+are two processes on a single OS, **not** a Windows/macOS pairing test.
+
+The runner reuses production `ProtocolUtil`, not the product's Client/Server or
+native input adapters. Its successful reconnect/reset checks establish only the
+test sink's behavior. They do not prove product cleanup, physical capture,
+clipboard isolation, browser navigation or IME correctness. Keep these evidence
+levels separate in reports and extend the production integration boundary next.
+
+For native acceptance, compare actual strings/composition in a dedicated native
+text field, browser input/textarea/contenteditable and address bar. Test Hangul
+to English as well as English to Hangul, including active composition. Record
+menu selection, local OS shortcut and remote Right Alt as separate paths. An
+input-source menu change alone is not a passed test. Gureum is an optional
+compatibility case; include the built-in macOS Korean input source as baseline.
+
 For releases, follow the [release checklist](../../doc/release-checklist.md)
 and verify the generated archives and SHA256 files before publishing.
