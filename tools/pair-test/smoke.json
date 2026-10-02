@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "scenario_id": "key-mouse-reconnect",
+  "boundary": "production-codec-record-only",
+  "phases": [
+    {"name": "balanced", "expect_held_at_disconnect": false, "events": [
+      {"event": "key_down", "key": 97, "mask": 0, "button": 30},
+      {"event": "key_up", "key": 97, "mask": 0, "button": 30},
+      {"event": "key_down", "key": 61409, "mask": 1, "button": 42},
+      {"event": "key_down", "key": 65, "mask": 1, "button": 30},
+      {"event": "key_up", "key": 65, "mask": 1, "button": 30},
+      {"event": "key_up", "key": 61409, "mask": 0, "button": 42},
+      {"event": "mouse_down", "button": 4},
+      {"event": "mouse_up", "button": 4},
+      {"event": "mouse_down", "button": 5},
+      {"event": "mouse_up", "button": 5}
+    ]},
+    {"name": "disconnect-held", "expect_held_at_disconnect": true, "events": [
+      {"event": "key_down", "key": 61409, "mask": 1, "button": 42},
+      {"event": "mouse_down", "button": 4}
+    ]},
+    {"name": "after-reconnect", "expect_held_at_disconnect": false, "events": [
+      {"event": "key_down", "key": 97, "mask": 0, "button": 30},
+      {"event": "key_up", "key": 97, "mask": 0, "button": 30},
+      {"event": "mouse_down", "button": 5},
+      {"event": "mouse_up", "button": 5}
+    ]}
+  ]
+}
