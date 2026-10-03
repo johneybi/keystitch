@@ -23,6 +23,12 @@ native codec and script fingerprints, sends production-format fixture messages
 over TCP in both directions, and gathers one result bundle. Its local CI runs
 are two processes on a single OS, **not** a Windows/macOS pairing test.
 
+When both hosts have Codex chats, use the runner's bounded split jobs and collect
+all four host reports. SSH/Remote Login is not required. The control chats launch
+and collect jobs; only fixed fixture messages travel over the separate test TCP
+connection. Keep socket direction separate from event direction so Windows can
+connect outbound for both directions without an inbound listener or firewall change.
+
 The runner reuses production `ProtocolUtil`, not the product's Client/Server or
 native input adapters. Its successful reconnect/reset checks establish only the
 test sink's behavior. They do not prove product cleanup, physical capture,

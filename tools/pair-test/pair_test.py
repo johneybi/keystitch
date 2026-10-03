@@ -6,7 +6,9 @@ strict fixture state, cancellation and orchestration are test-harness code.
 """
 import argparse
 import base64
+from contextlib import contextmanager
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -22,6 +24,7 @@ import sys
 import threading
 import time
 import uuid
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 MAX_FRAME = 4096
@@ -32,6 +35,9 @@ FAULTS = ("missing_up", "duplicate_up", "wrong_key", "out_of_order",
 SOURCE_FINGERPRINT = "sha256-lf-v1"
 EXPECTED_FIELDS = {"os", "arch", "source_commit", "source_digest", "source_fingerprint",
                    "codec_sha256", "agent_sha256", "agent_file_sha256", "source_dirty", "protocol"}
+PAIR_FIELDS = ("source_commit", "source_digest", "source_fingerprint", "protocol",
+               "agent_sha256", "source_dirty")
+MAX_REPORT = 2 * 1024 * 1024
 
 
 class Failure(Exception):
@@ -223,6 +229,56 @@ def connected(address, stop, deadline):
             stop.wait(0.05)
 
 
+class PeerConnections:
+    """Socket direction is independent of fixture direction (no native input)."""
+    def __init__(self, job, info, stop, deadline):
+        self.job, self.info, self.stop, self.deadline = job, info, stop, deadline
+        self.network_role = job.get("network_role", "listener" if job["role"] == "sender" else "connector")
+        if self.network_role not in ("listener", "connector"):
+            raise Failure("configuration", "invalid network role")
+        self.listener = None
+
+    def __enter__(self):
+        if self.network_role == "listener":
+            self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                self.listener.bind((self.job["listen"], 0))
+                self.listener.listen(1)
+                self.listener.settimeout(0.2)
+                emit(self.job, "ready", port=self.listener.getsockname()[1], manifest=self.info)
+            except BaseException:
+                self.listener.close()
+                raise
+        return self
+
+    def __exit__(self, *_):
+        if self.listener:
+            self.listener.close()
+
+    @contextmanager
+    def connection(self):
+        if self.listener:
+            while True:
+                checked(self.stop, self.deadline)
+                try:
+                    sock, _ = self.listener.accept()
+                    break
+                except socket.timeout:
+                    pass
+        else:
+            sock = connected((self.job["connect"], int(self.job["port"])), self.stop, self.deadline)
+        with sock:
+            sock.settimeout(0.2)
+            token = ("PAIR1:" + self.job["token"]).encode()
+            if self.listener:
+                auth = receive_frame(sock, self.stop, self.deadline, "handshake")
+                if not secrets.compare_digest(auth, token):
+                    raise Failure("handshake", "incorrect ephemeral fixture token")
+            else:
+                send_frame(sock, token, self.stop, self.deadline)
+            yield sock
+
+
 def emit(job, stage, **fields):
     item = dict(run_id=job["run_id"], scenario_id=job["scenario"]["scenario_id"],
                 host_id=job["host_id"], role=job["role"], stage=stage,
@@ -260,8 +316,7 @@ def agent_run(codec_path, host_id):
         if job.get("fault") not in (None, *FAULTS):
             raise Failure("configuration", "unknown fault fixture")
         info = inspect_host(codec_path, host_id)
-        for field in ("codec_sha256", "source_commit", "source_digest", "source_fingerprint",
-                      "agent_sha256", "agent_file_sha256", "os"):
+        for field in EXPECTED_FIELDS:
             if info[field] != job["expected"][field]:
                 raise Failure("preflight", "host changed since preflight: " + field)
         codec = Codec(codec_path)
@@ -269,6 +324,7 @@ def agent_run(codec_path, host_id):
         if not 0 < timeout <= 120:
             raise Failure("configuration", "timeout must be 0..120 seconds")
         deadline = time.monotonic() + timeout
+        emit(job, "preflight", manifest=info)
 
         # The control channel stays open until job completion. EOF/cancel only
         # affects this agent's own sockets and children; no persistent service.
@@ -280,25 +336,10 @@ def agent_run(codec_path, host_id):
             finally:
                 stop.set()
         threading.Thread(target=cancellation, daemon=True).start()
-        if job["role"] == "sender":
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-                listener.bind((job["listen"], 0))
-                listener.listen(1)
-                listener.settimeout(0.2)
-                emit(job, "ready", port=listener.getsockname()[1], manifest=info)
+        with PeerConnections(job, info, stop, deadline) as peers:
+            if job["role"] == "sender":
                 for index, phase in enumerate(job["scenario"]["phases"]):
-                    while True:
-                        checked(stop, deadline)
-                        try:
-                            sock, _ = listener.accept()
-                            break
-                        except socket.timeout:
-                            pass
-                    with sock:
-                        sock.settimeout(0.2)
-                        auth = receive_frame(sock, stop, deadline, "handshake")
-                        if not secrets.compare_digest(auth, ("PAIR1:" + job["token"]).encode()):
-                            raise Failure("handshake", "incorrect ephemeral fixture token")
+                    with peers.connection() as sock:
                         if job.get("fault") == "handshake_timeout":
                             while True:
                                 checked(stop, deadline)
@@ -328,43 +369,41 @@ def agent_run(codec_path, host_id):
                             if ack != {"event": "noop"}:
                                 raise Failure("delivery", "missing fixture acknowledgement")
                         emit(job, "disconnect", phase=index)
-        else:
-            state = SinkState()
-            address = (job["connect"], int(job["port"]))
-            for index, phase in enumerate(job["scenario"]["phases"]):
-                if state.held():
-                    raise Failure("state", "record-only sink leaked state across reconnect")
-                emit(job, "state_before", phase=index, state=state.snapshot())
-                with connected(address, stop, deadline) as sock:
-                    send_frame(sock, ("PAIR1:" + job["token"]).encode(), stop, deadline)
-                    hello = codec.decode(receive_frame(sock, stop, deadline, "handshake"))
-                    if hello != {"event": "hello", "protocol": info["protocol"]}:
-                        raise Failure("handshake", "production greeting mismatch")
-                    send_frame(sock, codec.encode({"event": "hello_back", "name": "pair-sink"}), stop, deadline)
-                    emit(job, "handshake", phase=index)
-                    for seq, expected in enumerate(phase["events"]):
-                        event = codec.decode(receive_frame(sock, stop, deadline, "delivery"))
-                        if event != expected:
-                            raise Failure("delivery", "received event differs at phase %d seq %d" % (index, seq))
-                        state.apply(event)
-                        emit(job, "received", phase=index, seq=seq, event=event, state=state.snapshot())
-                        send_frame(sock, codec.encode({"event": "noop"}), stop, deadline)
-                    while True:
-                        checked(stop, deadline)
-                        try:
-                            extra = sock.recv(1)
-                            break
-                        except socket.timeout:
-                            pass
-                    if extra:
-                        raise Failure("delivery", "unexpected extra packet after fixture")
-                if state.held() != phase["expect_held_at_disconnect"]:
-                    raise Failure("state", "unexpected held state at disconnect")
-                before = state.snapshot()
-                if job.get("fault") != "leak_state":
-                    state.reset()
-                emit(job, "reset", phase=index, before=before, after=state.snapshot(),
-                     boundary="harness_sink_not_product_KeyState")
+            else:
+                state = SinkState()
+                for index, phase in enumerate(job["scenario"]["phases"]):
+                    if state.held():
+                        raise Failure("state", "record-only sink leaked state across reconnect")
+                    emit(job, "state_before", phase=index, state=state.snapshot())
+                    with peers.connection() as sock:
+                        hello = codec.decode(receive_frame(sock, stop, deadline, "handshake"))
+                        if hello != {"event": "hello", "protocol": info["protocol"]}:
+                            raise Failure("handshake", "production greeting mismatch")
+                        send_frame(sock, codec.encode({"event": "hello_back", "name": "pair-sink"}), stop, deadline)
+                        emit(job, "handshake", phase=index)
+                        for seq, expected in enumerate(phase["events"]):
+                            event = codec.decode(receive_frame(sock, stop, deadline, "delivery"))
+                            if event != expected:
+                                raise Failure("delivery", "received event differs at phase %d seq %d" % (index, seq))
+                            state.apply(event)
+                            emit(job, "received", phase=index, seq=seq, event=event, state=state.snapshot())
+                            send_frame(sock, codec.encode({"event": "noop"}), stop, deadline)
+                        while True:
+                            checked(stop, deadline)
+                            try:
+                                extra = sock.recv(1)
+                                break
+                            except socket.timeout:
+                                pass
+                        if extra:
+                            raise Failure("delivery", "unexpected extra packet after fixture")
+                    if state.held() != phase["expect_held_at_disconnect"]:
+                        raise Failure("state", "unexpected held state at disconnect")
+                    before = state.snapshot()
+                    if job.get("fault") != "leak_state":
+                        state.reset()
+                    emit(job, "reset", phase=index, before=before, after=state.snapshot(),
+                         boundary="harness_sink_not_product_KeyState")
         if job.get("fault") == "bad_result":
             print("not-json", flush=True)
         else:
@@ -487,6 +526,8 @@ class HostProcess:
                     item = json.loads(line)
                     if not isinstance(item, dict):
                         raise ValueError("host output must be an object")
+                    if len(self.records) >= 4096:
+                        raise ValueError("too many host records")
                     self.records.append(item)
                     self.items.put(item)
                 except ValueError as error:
@@ -595,7 +636,7 @@ def validate_records(processes, scenario, job_id):
                     for seq, event in enumerate(phase["events"])]
         if observed != expected:
             raise Failure("artifacts", "incomplete or different event trace")
-        if len([item for item in items if item.get("stage") == "handshake"]) != len(scenario["phases"]):
+        if [item.get("phase") for item in items if item.get("stage") == "handshake"] != list(range(len(scenario["phases"]))):
             raise Failure("artifacts", "missing handshake/reconnect evidence")
         if role == "sink":
             resets = [item for item in items if item.get("stage") == "reset"]
@@ -712,8 +753,7 @@ def controller(args):
                                   expected={key: info[key] for key in EXPECTED_FIELDS}))
         validate_hosts(hosts)
         infos = [preflight(host, args.timeout) for host in hosts]
-        for field in ("source_commit", "source_digest", "source_fingerprint", "protocol",
-                      "agent_sha256", "source_dirty"):
+        for field in PAIR_FIELDS:
             if infos[0][field] != infos[1][field]:
                 raise Failure("preflight", "paired build mismatch: " + field)
         if pair_mode and {info["os"] for info in infos} != {"Windows", "Darwin"}:
@@ -753,6 +793,243 @@ def controller(args):
     return 0 if result["status"] == "passed" else 1
 
 
+def read_json_bounded(path, limit=MAX_LINE):
+    with Path(path).open("rb") as stream:
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise Failure("artifacts", "JSON file exceeds size limit")
+    return json.loads(data)
+
+
+def write_private_json(path, value):
+    # No overwrite and no token in command arguments or normal stdout.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        json.dump(value, stream, indent=2)
+        stream.write("\n")
+
+
+def split_address(value):
+    try:
+        address = ipaddress.IPv4Address(value)
+    except (ValueError, TypeError) as error:
+        raise Failure("configuration", "split endpoint must be an IPv4 address") from error
+    networks = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    if not any(address in ipaddress.IPv4Network(net) for net in networks):
+        raise Failure("configuration", "split endpoint must be loopback or a specific private LAN address")
+    if str(address) in ("127.0.0.0", "127.255.255.255"):
+        raise Failure("configuration", "invalid loopback endpoint")
+    return str(address)
+
+
+def split_hosts(hosts):
+    validate_hosts(hosts)
+    for host in hosts:
+        if (host["transport"] != "local" or set(host["expected"]) != EXPECTED_FIELDS
+                or host["expected"]["source_dirty"] is not False):
+            raise Failure("preflight", "split jobs require complete, clean local host pins")
+    for field in PAIR_FIELDS:
+        if hosts[0]["expected"][field] != hosts[1]["expected"][field]:
+            raise Failure("preflight", "paired build mismatch: " + field)
+
+
+def validate_split_request(request):
+    fields = {"schema_version", "boundary", "pair_run_id", "direction", "scenario", "config_sha256",
+              "hosts", "connect", "port", "token", "timeout"}
+    if (not isinstance(request, dict) or set(request) != fields or type(request["schema_version"]) is not int
+            or request["schema_version"] != 1
+            or request["boundary"] != "production-codec-record-only"
+            or not isinstance(request["pair_run_id"], str)
+            or not SAFE_ID.fullmatch(request["pair_run_id"]) or len(request["pair_run_id"]) > 78
+            or type(request["direction"]) is not int or request["direction"] not in (0, 1)):
+        raise Failure("configuration", "invalid split request identity/boundary")
+    validate_scenario(request["scenario"])
+    if request["config_sha256"] != hashlib.sha256(canonical(request["scenario"])).hexdigest():
+        raise Failure("configuration", "split scenario hash mismatch")
+    split_hosts(request["hosts"])
+    split_address(request["connect"])
+    if type(request["port"]) is not int or not 1 <= request["port"] <= 65535:
+        raise Failure("configuration", "invalid split port")
+    if not isinstance(request["token"], str) or not re.fullmatch(r"[a-f0-9]{64}", request["token"]):
+        raise Failure("configuration", "invalid ephemeral split token")
+    if type(request["timeout"]) not in (int, float) or not 0 < request["timeout"] <= 120:
+        raise Failure("configuration", "split timeout must be 0..120 seconds")
+
+
+def split_job(args):
+    """Own one local subprocess; exchange only a bounded request via Codex chat."""
+    host = read_json_bounded(args.host_manifest)
+    listener = args.action == "split-listen"
+    if listener:
+        hosts = [host, read_json_bounded(args.peer_host_manifest)]
+        scenario = read_json_bounded(args.scenario)
+        request = dict(schema_version=1, boundary="production-codec-record-only",
+                       pair_run_id=args.run_id, direction=args.direction, scenario=scenario,
+                       config_sha256=hashlib.sha256(canonical(scenario)).hexdigest(), hosts=hosts,
+                       connect=split_address(host.get("connect_address", "127.0.0.1")),
+                       port=1, token=secrets.token_hex(32), timeout=args.timeout)
+    else:
+        request = read_json_bounded(args.request)
+        validate_split_request(request)
+        hosts = request["hosts"]
+        # A request never supplies the command/path to execute on this host.
+        if host != hosts[1]:
+            raise Failure("preflight", "request connector differs from local host manifest")
+    validate_split_request(request)
+    if (Path(host["agent"]).resolve() != Path(__file__).resolve()
+            or Path(host["python"]).resolve() != Path(sys.executable).resolve()):
+        raise Failure("preflight", "split job must use the current local Python and trusted agent")
+    # Check the local executable pin before executing even inspect.
+    if digest(host["codec"]) != host["expected"]["codec_sha256"]:
+        raise Failure("preflight", "local codec file pin mismatch")
+    info = preflight(host, 5)
+    role = ("sender" if request["direction"] == 0 else "sink")
+    if not listener:
+        role = "sink" if role == "sender" else "sender"
+    run_id = request["pair_run_id"] + "-" + str(request["direction"])
+    job = dict(run_id=run_id, host_id=host["host_id"], role=role, scenario=request["scenario"],
+               expected=info, timeout=request["timeout"], token=request["token"],
+               config_sha256=request["config_sha256"], network_role="listener" if listener else "connector")
+    if listener:
+        job["listen"] = split_address(host.get("listen", "127.0.0.1"))
+    else:
+        job.update(connect=request["connect"], port=request["port"])
+    output = Path(args.output).resolve()
+    output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    report = dict(schema_version=1, boundary=request["boundary"], pair_run_id=request["pair_run_id"],
+                  direction=request["direction"], run_id=run_id, role=role, network_role=job["network_role"],
+                  manifest=info, hosts=hosts, scenario=request["scenario"], connect=request["connect"],
+                  config_sha256=request["config_sha256"], status="failed", cleanup="unconfirmed")
+    process, failure = None, None
+    deadline = time.monotonic() + request["timeout"] + 10
+    try:
+        process = HostProcess(host, job)
+        if listener:
+            ready = process.wait_stage("ready", deadline)
+            request["port"] = ready["port"]
+            validate_split_request(request)
+            write_private_json(output / "request.json", request)
+            print(json.dumps({"stage": "ready", "request": str(output / "request.json"),
+                              "run_id": run_id, "port": ready["port"], "native_input": False}), flush=True)
+        report["request_sha256"] = hashlib.sha256(canonical(request)).hexdigest()
+        process.wait_stage("result", deadline)
+    except (Failure, OSError, KeyboardInterrupt) as error:
+        failure = error if isinstance(error, Failure) else Failure(
+            "interrupted" if isinstance(error, KeyboardInterrupt) else "process", str(error))
+    finally:
+        if process:
+            try:
+                process.cleanup()
+                report["cleanup"] = "completed"
+            except Failure as error:
+                failure = error
+            report.update(records=process.records, stderr=process.errors, exit_code=process.proc.returncode)
+    if failure is None:
+        try:
+            if report.get("exit_code") != 0:
+                raise Failure("process", "local agent exited unsuccessfully")
+            validate_records([(role, process)], request["scenario"], run_id)
+        except Failure as error:
+            failure = error
+    if failure:
+        report.update(failure_stage=failure.stage, error=str(failure)[:1000])
+    else:
+        report["status"] = "passed"
+    write_private_json(output / "host-result.json", report)
+    print(json.dumps({"status": report["status"], "report": str(output / "host-result.json"),
+                      "failure_stage": report.get("failure_stage")}), flush=True)
+    return 0 if report["status"] == "passed" else 1
+
+
+def collect_split(args):
+    output = Path(args.output).resolve()
+    output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    result = dict(schema_version=1, run_id=args.run_id, status="failed", control_transport="codex_split",
+                  coverage="production_codec_over_tcp_record_sink", directions=[],
+                  evidence=dict(real_subprocess_tcp_codec=False, windows_mac_pair=False,
+                                production_client_server=False, native_input=False, physical_capture=False,
+                                ime=False, mouse_navigation=False, production_reconnect_state=False))
+    try:
+        if not isinstance(args.run_id, str) or not SAFE_ID.fullmatch(args.run_id) or len(args.run_id) > 78:
+            raise Failure("configuration", "invalid split collection run ID")
+        if len(args.report) != 4:
+            raise Failure("artifacts", "collect requires four host reports for two directions")
+        reports = [read_json_bounded(path, MAX_REPORT) for path in args.report]
+        if any(not isinstance(item, dict) for item in reports):
+            raise Failure("artifacts", "split reports must be objects")
+        manifests, hosts, scenario = {}, None, None
+        for direction in (0, 1):
+            pair = [item for item in reports if item.get("direction") == direction]
+            if len(pair) != 2 or {item.get("network_role") for item in pair} != {"listener", "connector"}:
+                raise Failure("artifacts", "missing/duplicate direction endpoints")
+            pair.sort(key=lambda item: item["network_role"] != "listener")
+            first, second = pair
+            current_hosts = first["hosts"]
+            split_hosts(current_hosts)
+            if (hosts is not None and hosts != current_hosts) or second["hosts"] != current_hosts:
+                raise Failure("artifacts", "host pins changed between split reports")
+            hosts = current_hosts
+            current_scenario = first["scenario"]
+            validate_scenario(current_scenario)
+            if (scenario is not None and scenario != current_scenario) or second["scenario"] != current_scenario:
+                raise Failure("artifacts", "scenario changed between split reports")
+            scenario = current_scenario
+            config_hash = hashlib.sha256(canonical(scenario)).hexdigest()
+            request_hash = first.get("request_sha256", "")
+            if not re.fullmatch(r"[a-f0-9]{64}", request_hash) or second.get("request_sha256") != request_hash:
+                raise Failure("artifacts", "split request hashes differ")
+            if first["connect"] != second["connect"]:
+                raise Failure("artifacts", "split endpoints differ")
+            split_address(first["connect"])
+            job_id = args.run_id + "-" + str(direction)
+            processes = []
+            for index, item in enumerate(pair):
+                role = "sender" if (direction == 0) == (index == 0) else "sink"
+                info = item["manifest"]
+                host = hosts[index]
+                if (item.get("schema_version") != 1 or item.get("boundary") != "production-codec-record-only"
+                        or type(item.get("direction")) is not int
+                        or item.get("pair_run_id") != args.run_id or item.get("run_id") != job_id
+                        or item.get("role") != role or item.get("status") != "passed"
+                        or type(item.get("exit_code")) is not int or item["exit_code"] != 0
+                        or item.get("cleanup") != "completed" or item.get("config_sha256") != config_hash
+                        or info.get("host_id") != host["host_id"] or info.get("native_input") is not False
+                        or info.get("boundary") != "production_ProtocolUtil"):
+                    raise Failure("artifacts", "invalid/failed split host evidence")
+                for field in EXPECTED_FIELDS:
+                    if info.get(field) != host["expected"][field]:
+                        raise Failure("preflight", "split runtime differs from host pin: " + field)
+                if host["host_id"] in manifests and manifests[host["host_id"]] != info:
+                    raise Failure("preflight", "runtime changed between directions")
+                manifests[host["host_id"]] = info
+                records = item.get("records")
+                if not isinstance(records, list) or not 1 <= len(records) <= 4096:
+                    raise Failure("artifacts", "missing/oversized split trace")
+                if any(not isinstance(record, dict) or record.get("host_id") != host["host_id"]
+                       or record.get("scenario_id") != scenario["scenario_id"]
+                       or record.get("input_origin") != "protocol_fixture" for record in records):
+                    raise Failure("artifacts", "mixed host/scenario in split trace")
+                inspected = [record.get("manifest") for record in records if record.get("stage") == "preflight"]
+                if inspected != [info]:
+                    raise Failure("preflight", "missing/mismatched child runtime preflight")
+                processes.append((role, SimpleNamespace(records=records)))
+            validate_records(processes, scenario, job_id)
+            result["directions"].append(dict(direction=direction, status="passed", reports=pair))
+        actual_os = {info["os"] for info in manifests.values()}
+        if not args.local_smoke and actual_os != {"Windows", "Darwin"}:
+            raise Failure("preflight", "real split pair requires actual Windows and macOS reports")
+        if not args.local_smoke and any(ipaddress.IPv4Address(item["connect"]).is_loopback for item in reports):
+            raise Failure("preflight", "real split pair cannot use a loopback endpoint")
+        result.update(status="passed", manifests=list(manifests.values()), config_sha256=config_hash)
+        result["evidence"].update(real_subprocess_tcp_codec=True, windows_mac_pair=not args.local_smoke)
+    except (Failure, OSError, ValueError, KeyError, TypeError) as error:
+        result.update(failure_stage=getattr(error, "stage", "artifacts"), error=str(error)[:1000])
+    write_private_json(output / "result.json", result)
+    print(json.dumps({"status": result["status"], "result": str(output / "result.json"),
+                      "failure_stage": result.get("failure_stage")}), flush=True)
+    return 0 if result["status"] == "passed" else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest="action", required=True)
@@ -775,7 +1052,31 @@ def main():
     run.add_argument("--output", required=True, help="a new, non-existing result directory")
     run.add_argument("--timeout", type=float, default=30)
     run.add_argument("--fault", choices=FAULTS, help="test-harness fault injection only")
+    for action in ("split-listen", "split-connect"):
+        sub = subs.add_parser(action, help="one local bounded job, coordinated without SSH")
+        sub.add_argument("--host-manifest", required=True)
+        sub.add_argument("--output", required=True)
+        if action == "split-listen":
+            sub.add_argument("--peer-host-manifest", required=True)
+            sub.add_argument("--run-id", required=True)
+            sub.add_argument("--direction", type=int, choices=(0, 1), required=True)
+            sub.add_argument("--timeout", type=float, default=120)
+            sub.add_argument("--scenario", default=str(HERE / "smoke.json"))
+        else:
+            sub.add_argument("--request", required=True)
+    collect = subs.add_parser("split-collect", help="validate all four reports, not chat acknowledgements")
+    collect.add_argument("--run-id", required=True)
+    collect.add_argument("--report", action="append", required=True)
+    collect.add_argument("--output", required=True)
+    collect.add_argument("--local-smoke", action="store_true", help="explicit same-host test; never a Windows/Mac pair pass")
     args = parser.parse_args()
+    if args.action.startswith("split-"):
+        try:
+            return collect_split(args) if args.action == "split-collect" else split_job(args)
+        except (Failure, OSError, ValueError, KeyError, TypeError) as error:
+            print(json.dumps({"status": "failed", "failure_stage": getattr(error, "stage", "configuration"),
+                              "error": str(error)[:1000]}), flush=True)
+            return 1
     if args.action == "run":
         try:
             return controller(args)

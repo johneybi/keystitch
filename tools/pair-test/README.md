@@ -93,17 +93,84 @@ Real cross-host execution remains a separately authorized step.
 ## Codex-managed control versus SSH automation
 
 With both hosts connected to Codex, the coordinating chat can request commands
-in the existing Windows chat and read its results. This control path can prepare
-and inspect each host's tools without enabling an SSH server. It does not make
+in the existing Windows chat and read its results. This control path can prepare,
+inspect and start each host's one-shot tools without enabling an SSH server. It does not make
 the hosts share a filesystem or carry the test fixture's TCP traffic.
 
 For a Codex-managed pair run, launch bounded one-shot jobs on each host and
 collect their matching run IDs, source fingerprints, complete event traces and
 exit results. Do not infer a pair pass from messages saying the jobs were sent.
-The current `run --host-manifest` CLI automates remote processes through SSH;
-it does not yet automate split, chat-controlled jobs. SSH is an optional control
+The `split-listen`, `split-connect` and `split-collect` commands support this
+split, chat-controlled workflow. The original `run --host-manifest` CLI still
+automates remote processes through SSH. SSH is an optional control
 transport, not a requirement of the product or of protocol testing. Do not enable
 Remote Login/OpenSSH or change firewall rules merely to prepare the test tools.
+
+## One-shot pair using Codex chats (no SSH)
+
+Use the same clean commit and verified native codec on both hosts. Generate fresh
+**local** manifests there (`manifest`, without `--ssh-target`) and copy only the
+manifest JSON through the coordinating chats. The Mac manifest must use its
+specific private LAN IPv4 address for both `listen` and `connect-address`.
+Loopback is the safe default and is only valid for a local smoke. The split path
+rejects wildcard, public and IPv6 endpoints. It does not change firewall rules.
+
+One host (typically Mac) listens on a temporary OS-assigned port for **both**
+fixture directions. The other host (Windows) only makes outbound connections;
+it does not need an inbound Python firewall exception. Socket direction is not
+fixture direction: direction 0 sends Mac→Windows; direction 1 sends Windows→Mac.
+Each direction repeats all three fixture connection phases. No product port or
+installed process is reused.
+
+1. Prepare the connector's exact launch command in its chat **before** starting
+   the listener. Choose a fresh shared run ID. Keep both manifests at their
+   actual native paths; peer paths are informational, never executed remotely.
+2. On Mac, start a bounded listener in its dedicated worktree:
+
+   ```sh
+   python3 tools/pair-test/pair_test.py split-listen --host-manifest mac-host.json --peer-host-manifest windows-host.json --run-id pair-example-001 --direction 0 --timeout 120 --output pair-example-001/mac-0
+   ```
+
+   It prints `ready` with a path to a new private `request.json`. Copy the exact
+   JSON through the trusted coordinating chats into a fresh file on Windows.
+   This contains an ephemeral fixture token: do not commit or publish it. No
+   token is printed by the CLI, placed in command arguments or saved in reports.
+3. On Windows, run the prepared command against that local request file:
+
+   ```powershell
+   python tools/pair-test/pair_test.py split-connect --host-manifest windows-host.json --request pair-example-001-request-0.json --output pair-example-001/windows-0
+   ```
+
+   The request must exactly match Windows' own manifest. Commands and executable
+   paths come only from that local manifest/current trusted agent, not a peer
+   instruction. Both the wrapper and its child inspect/pin their actual runtime.
+4. Wait for both jobs' exit results. Repeat steps 2–3 with **the same** run ID,
+   `--direction 1`, and fresh `mac-1`/`windows-1` directories. Each job owns and
+   cleans up only its own subprocess/socket; timeout, EOF and cancellation are
+   failures, not background services. The deadline is at most 120 seconds;
+   if chat dispatch takes too long, collect the failure and retry a new run ID.
+5. Copy the two complete Windows `host-result.json` reports back through the
+   trusted control channel. Collect all four reports into a new directory:
+
+   ```sh
+   python3 tools/pair-test/pair_test.py split-collect --run-id pair-example-001 --report pair-example-001/mac-0/host-result.json --report windows-0-host-result.json --report pair-example-001/mac-1/host-result.json --report windows-1-host-result.json --output pair-example-001/collected
+   ```
+
+The collector requires matching run/request/scenario hashes, unchanged clean
+host pins, actual runtime preflight traces, successful exit/cleanup, complete
+event/handshake traces and independently replayed sink state in both directions.
+Two same-OS or loopback jobs cannot pass as a real Windows/Mac pair. A deliberate
+same-host pipeline test must add `split-collect --local-smoke`; its pair evidence
+stays false. Reports are trusted host-produced evidence, not cryptographically
+signed remote attestation: do not accept arbitrarily authored report JSON.
+
+Only fixed record-only fixtures travel over TCP. The ephemeral token is not TLS;
+use a trusted LAN. Private output directories/files use 0700/0600 on Unix; on
+Windows they inherit the containing directory's ACL. Missing reports, delayed
+chat dispatch, an inaccessible LAN address or firewall rejection are explicit
+failures. Do not work around them by enabling SSH/services, widening listeners,
+changing system settings or using native input. A split pass still proves none
+of the native IME, browser, clipboard or production behavior described above.
 
 ## Actual Windows/macOS pair using an existing SSH controller
 
