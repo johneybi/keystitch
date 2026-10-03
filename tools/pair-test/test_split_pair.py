@@ -17,6 +17,13 @@ CODEC = os.environ.get("PAIR_CODEC")
 
 
 class SplitConfigTests(unittest.TestCase):
+    def test_prepared_port_excludes_privileged_and_product_ports(self):
+        for port in (1024, 49152, 65535):
+            self.assertEqual(pair.prepared_port(port), port)
+        for port in (True, 0, 80, 1023, 24800, 24801, 65536, 49152.0, "49152", None):
+            with self.assertRaises(pair.Failure):
+                pair.prepared_port(port)
+
     def test_split_endpoints_exclude_wildcard_public_and_ipv6(self):
         for address in ("127.0.0.1", "10.1.2.3", "172.16.1.2", "192.168.1.20"):
             self.assertEqual(pair.split_address(address), address)
@@ -58,6 +65,64 @@ class SplitProcessTests(unittest.TestCase):
 
     def command(self, *args):
         return [sys.executable, str(Path(pair.__file__).resolve()), *map(str, args)]
+
+    def prepare(self, direction):
+        output = self.root / ("prepared-" + str(direction))
+        args = mock.Mock(host_manifest=str(self.paths[0]), peer_host_manifest=str(self.paths[1]),
+                         run_id="split-test", direction=direction, timeout=15.0,
+                         scenario=str(pair.HERE / "smoke.json"), output=str(output))
+        # Inspect is allowed; preparation must not create an agent or listening socket.
+        with mock.patch.object(pair, "HostProcess") as process, mock.patch("builtins.print") as printed:
+            self.assertEqual(pair.split_prepare(args), 0)
+            process.assert_not_called()
+        request = pair.read_json_bounded(output / "request.json")
+        metadata = json.loads(printed.call_args.args[0])
+        self.assertEqual(metadata["stage"], "prepared")
+        self.assertNotIn(request["token"], printed.call_args.args[0])
+        self.assertEqual(metadata["request_sha256"], pair.hashlib.sha256(pair.canonical(request)).hexdigest())
+        self.assertFalse((output / "host-result.json").exists())
+        with self.assertRaises(OSError):
+            pair.socket.create_connection(("127.0.0.1", request["port"]), timeout=0.5)
+        return output / "request.json", request
+
+    def run_prepared_direction(self, direction):
+        request_path, request = self.prepare(direction)
+        left = self.root / ("served-" + str(direction))
+        right = self.root / ("connected-" + str(direction))
+        command = self.command("split-connect", "--host-manifest", self.paths[1],
+                               "--request", request_path, "--output", right)
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as connector:
+            lines = queue.Queue()
+            reader = threading.Thread(target=lambda: lines.put(connector.stdout.readline()), daemon=True)
+            reader.start()
+            try:
+                # The connector child starts before any listener exists. Retry must survive this order.
+                started_line = lines.get(timeout=12)
+                reader.join(timeout=1)
+                started = json.loads(started_line)
+                self.assertEqual(started.get("stage"), "started", started_line)
+                self.assertEqual(started["run_id"], "split-test-" + str(direction))
+                self.assertNotIn(request["token"], started_line)
+                listener = subprocess.run(self.command("split-serve", "--host-manifest", self.paths[0],
+                                                       "--request", request_path, "--output", left),
+                                          capture_output=True, text=True, timeout=25)
+                stdout, stderr = connector.communicate(timeout=25)
+                self.assertEqual(listener.returncode, 0, listener.stdout + listener.stderr)
+                self.assertEqual(connector.returncode, 0, stdout + stderr)
+                self.assertEqual(pair.read_json_bounded(left / "request.json"), request)
+                expected_hash = pair.hashlib.sha256(pair.canonical(request)).hexdigest()
+                for output in (left, right):
+                    report = pair.read_json_bounded(output / "host-result.json", pair.MAX_REPORT)
+                    self.assertEqual(report["request_sha256"], expected_hash)
+                    self.assertEqual(report["cleanup"], "completed")
+                    self.assertEqual(report["exit_code"], 0)
+                    self.assertTrue(any(record["stage"] == "preflight" for record in report["records"]))
+                return [left / "host-result.json", right / "host-result.json"]
+            finally:
+                if connector.poll() is None:
+                    connector.terminate()
+                    connector.communicate(timeout=15)
+                reader.join(timeout=2)
 
     def run_direction(self, direction, modify_request=None):
         left, right = self.root / ("left-" + str(direction)), self.root / ("right-" + str(direction))
@@ -142,6 +207,48 @@ class SplitProcessTests(unittest.TestCase):
             pair.write_private_json(altered, changed)
             code, result = self.collect([reports[0], altered, *reports[2:]])
             self.assertEqual(code, 1, (stage, result))
+
+    def test_prepared_both_directions_start_connector_before_listener(self):
+        reports = self.run_prepared_direction(0) + self.run_prepared_direction(1)
+        code, result = self.collect(reports)
+        self.assertEqual(code, 0, result)
+        self.assertTrue(result["evidence"]["real_subprocess_tcp_codec"])
+        self.assertFalse(result["evidence"]["windows_mac_pair"])
+        self.assertFalse(result["evidence"]["native_input"])
+
+    def test_prepared_port_collision_fails_without_rebinding_or_killing_holder(self):
+        request_path, request = self.prepare(0)
+        with pair.socket.socket(pair.socket.AF_INET, pair.socket.SOCK_STREAM) as holder:
+            holder.bind(("127.0.0.1", request["port"]))
+            holder.listen(1)
+            output = self.root / "collision"
+            done = subprocess.run(self.command("split-serve", "--host-manifest", self.paths[0],
+                                               "--request", request_path, "--output", output),
+                                  capture_output=True, text=True, timeout=25)
+            self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+            report = pair.read_json_bounded(output / "host-result.json", pair.MAX_REPORT)
+            self.assertEqual(report["cleanup"], "completed")
+            self.assertIsNotNone(report["exit_code"])
+            self.assertFalse(any(record["stage"] == "ready" for record in report["records"]))
+            # Our failure neither took over a different port nor closed the existing socket.
+            self.assertEqual(holder.getsockname()[1], request["port"])
+            with pair.socket.create_connection(("127.0.0.1", request["port"]), timeout=0.5):
+                pass
+
+    def test_prepared_listener_rejects_changed_host_address_or_unsafe_port_before_start(self):
+        _, request = self.prepare(0)
+        for index, (field, value) in enumerate((("port", 24800), ("port", 80),
+                                               ("connect", "192.168.0.37"), ("hosts", self.hosts[::-1]))):
+            changed = copy.deepcopy(request)
+            changed[field] = value
+            path = self.root / ("invalid-prepared-" + str(index) + ".json")
+            output = self.root / ("not-served-" + str(index))
+            pair.write_private_json(path, changed)
+            done = subprocess.run(self.command("split-serve", "--host-manifest", self.paths[0],
+                                               "--request", path, "--output", output),
+                                  capture_output=True, text=True, timeout=10)
+            self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+            self.assertFalse(output.exists())
 
     def test_split_request_cannot_change_connector_pins_or_add_commands(self):
         request = dict(schema_version=1, boundary="production-codec-record-only", pair_run_id="split-test",

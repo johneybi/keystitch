@@ -28,6 +28,9 @@ all four host reports. SSH/Remote Login is not required. The control chats launc
 and collect jobs; only fixed fixture messages travel over the separate test TCP
 connection. Keep socket direction separate from event direction so Windows can
 connect outbound for both directions without an inbound listener or firewall change.
+Stage both requests with `split-prepare` before starting any job, then observe
+the Windows connector's real child `started` signal before Mac `split-serve`.
+Chat dispatch/file-transfer time must not exhaust a listener's bounded deadline.
 
 The runner reuses production `ProtocolUtil`, not the product's Client/Server or
 native input adapters. Its successful reconnect/reset checks establish only the

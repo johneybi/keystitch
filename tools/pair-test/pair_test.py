@@ -242,7 +242,10 @@ class PeerConnections:
         if self.network_role == "listener":
             self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                self.listener.bind((self.job["listen"], 0))
+                port = self.job.get("listen_port", 0)
+                if port:
+                    prepared_port(port)
+                self.listener.bind((self.job["listen"], port))
                 self.listener.listen(1)
                 self.listener.settimeout(0.2)
                 emit(self.job, "ready", port=self.listener.getsockname()[1], manifest=self.info)
@@ -856,33 +859,70 @@ def validate_split_request(request):
         raise Failure("configuration", "split timeout must be 0..120 seconds")
 
 
-def split_job(args):
-    """Own one local subprocess; exchange only a bounded request via Codex chat."""
-    host = read_json_bounded(args.host_manifest)
-    listener = args.action == "split-listen"
-    if listener:
-        hosts = [host, read_json_bounded(args.peer_host_manifest)]
-        scenario = read_json_bounded(args.scenario)
-        request = dict(schema_version=1, boundary="production-codec-record-only",
-                       pair_run_id=args.run_id, direction=args.direction, scenario=scenario,
-                       config_sha256=hashlib.sha256(canonical(scenario)).hexdigest(), hosts=hosts,
-                       connect=split_address(host.get("connect_address", "127.0.0.1")),
-                       port=1, token=secrets.token_hex(32), timeout=args.timeout)
-    else:
-        request = read_json_bounded(args.request)
-        validate_split_request(request)
-        hosts = request["hosts"]
-        # A request never supplies the command/path to execute on this host.
-        if host != hosts[1]:
-            raise Failure("preflight", "request connector differs from local host manifest")
-    validate_split_request(request)
+def prepared_port(port):
+    if type(port) is not int or not 1024 <= port <= 65535 or port in (24800, 24801):
+        raise Failure("configuration", "prepared port must be an unprivileged non-product test port")
+    return port
+
+
+def split_request(args, host):
+    hosts = [host, read_json_bounded(args.peer_host_manifest)]
+    scenario = read_json_bounded(args.scenario)
+    return dict(schema_version=1, boundary="production-codec-record-only",
+                pair_run_id=args.run_id, direction=args.direction, scenario=scenario,
+                config_sha256=hashlib.sha256(canonical(scenario)).hexdigest(), hosts=hosts,
+                connect=split_address(host.get("connect_address", "127.0.0.1")),
+                port=1, token=secrets.token_hex(32), timeout=args.timeout)
+
+
+def split_preflight(host):
     if (Path(host["agent"]).resolve() != Path(__file__).resolve()
             or Path(host["python"]).resolve() != Path(sys.executable).resolve()):
         raise Failure("preflight", "split job must use the current local Python and trusted agent")
     # Check the local executable pin before executing even inspect.
     if digest(host["codec"]) != host["expected"]["codec_sha256"]:
         raise Failure("preflight", "local codec file pin mismatch")
-    info = preflight(host, 5)
+    return preflight(host, 5)
+
+
+def split_prepare(args):
+    """Choose a port and request, then close the socket: no job/listener yet."""
+    host = read_json_bounded(args.host_manifest)
+    request = split_request(args, host)
+    validate_split_request(request)
+    split_preflight(host)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+        reservation.bind((split_address(host.get("listen", "127.0.0.1")), 0))
+        request["port"] = prepared_port(reservation.getsockname()[1])
+    output = Path(args.output).resolve()
+    output.mkdir(mode=0o700, parents=True, exist_ok=False)
+    write_private_json(output / "request.json", request)
+    print(json.dumps(dict(stage="prepared", request=str(output / "request.json"),
+                          run_id=request["pair_run_id"] + "-" + str(request["direction"]),
+                          port=request["port"], native_input=False,
+                          request_sha256=hashlib.sha256(canonical(request)).hexdigest())), flush=True)
+    return 0
+
+
+def split_job(args):
+    """Own one local subprocess; exchange only a bounded request via Codex chat."""
+    host = read_json_bounded(args.host_manifest)
+    listener = args.action in ("split-listen", "split-serve")
+    if args.action == "split-listen":
+        request = split_request(args, host)
+    else:
+        request = read_json_bounded(args.request)
+        validate_split_request(request)
+        # Commands always come from the current trusted local host manifest.
+        if host != request["hosts"][0 if listener else 1]:
+            raise Failure("preflight", "request endpoint differs from local host manifest")
+        if listener:
+            prepared_port(request["port"])
+            if request["connect"] != split_address(host.get("connect_address", "127.0.0.1")):
+                raise Failure("preflight", "prepared address differs from local host manifest")
+    validate_split_request(request)
+    hosts = request["hosts"]
+    info = split_preflight(host)
     role = ("sender" if request["direction"] == 0 else "sink")
     if not listener:
         role = "sink" if role == "sender" else "sender"
@@ -892,6 +932,8 @@ def split_job(args):
                config_sha256=request["config_sha256"], network_role="listener" if listener else "connector")
     if listener:
         job["listen"] = split_address(host.get("listen", "127.0.0.1"))
+        if args.action == "split-serve":
+            job["listen_port"] = request["port"]
     else:
         job.update(connect=request["connect"], port=request["port"])
     output = Path(args.output).resolve()
@@ -906,11 +948,18 @@ def split_job(args):
         process = HostProcess(host, job)
         if listener:
             ready = process.wait_stage("ready", deadline)
+            if args.action == "split-serve" and ready["port"] != request["port"]:
+                raise Failure("preflight", "listener differs from prepared port")
             request["port"] = ready["port"]
             validate_split_request(request)
             write_private_json(output / "request.json", request)
             print(json.dumps({"stage": "ready", "request": str(output / "request.json"),
                               "run_id": run_id, "port": ready["port"], "native_input": False}), flush=True)
+        else:
+            # Expose actual child preflight, not just a queued chat/Popen claim.
+            process.wait_stage("preflight", deadline)
+            print(json.dumps(dict(stage="started", run_id=run_id, role=role,
+                                  native_input=False, monotonic_ns=time.monotonic_ns())), flush=True)
         report["request_sha256"] = hashlib.sha256(canonical(request)).hexdigest()
         process.wait_stage("result", deadline)
     except (Failure, OSError, KeyboardInterrupt) as error:
@@ -1052,11 +1101,11 @@ def main():
     run.add_argument("--output", required=True, help="a new, non-existing result directory")
     run.add_argument("--timeout", type=float, default=30)
     run.add_argument("--fault", choices=FAULTS, help="test-harness fault injection only")
-    for action in ("split-listen", "split-connect"):
+    for action in ("split-prepare", "split-listen", "split-serve", "split-connect"):
         sub = subs.add_parser(action, help="one local bounded job, coordinated without SSH")
         sub.add_argument("--host-manifest", required=True)
         sub.add_argument("--output", required=True)
-        if action == "split-listen":
+        if action in ("split-prepare", "split-listen"):
             sub.add_argument("--peer-host-manifest", required=True)
             sub.add_argument("--run-id", required=True)
             sub.add_argument("--direction", type=int, choices=(0, 1), required=True)
@@ -1072,7 +1121,9 @@ def main():
     args = parser.parse_args()
     if args.action.startswith("split-"):
         try:
-            return collect_split(args) if args.action == "split-collect" else split_job(args)
+            if args.action == "split-collect":
+                return collect_split(args)
+            return split_prepare(args) if args.action == "split-prepare" else split_job(args)
         except (Failure, OSError, ValueError, KeyError, TypeError) as error:
             print(json.dumps({"status": "failed", "failure_stage": getattr(error, "stage", "configuration"),
                               "error": str(error)[:1000]}), flush=True)
