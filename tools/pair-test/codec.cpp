@@ -62,6 +62,7 @@ int main(int argc, char** argv) {
             std::cout << "{\"protocol\":[" << kProtocolMajorVersion << ',' << kProtocolMinorVersion
                       << "],\"source_commit\":\"" << PAIR_SOURCE_COMMIT
                       << "\",\"source_digest\":\"" << PAIR_SOURCE_DIGEST
+                      << "\",\"source_fingerprint\":\"" << PAIR_SOURCE_FINGERPRINT
                       << "\",\"source_dirty\":" << (PAIR_SOURCE_DIRTY ? "true" : "false")
                       << ",\"boundary\":\"production_ProtocolUtil\",\"native_input\":false}\n";
             return 0;

@@ -29,8 +29,9 @@ MAX_LINE = 65536
 SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 FAULTS = ("missing_up", "duplicate_up", "wrong_key", "out_of_order",
           "peer_exit", "handshake_timeout", "leak_state", "bad_result")
-EXPECTED_FIELDS = {"os", "arch", "source_commit", "source_digest", "codec_sha256",
-                   "agent_sha256", "source_dirty", "protocol"}
+SOURCE_FINGERPRINT = "sha256-lf-v1"
+EXPECTED_FIELDS = {"os", "arch", "source_commit", "source_digest", "source_fingerprint",
+                   "codec_sha256", "agent_sha256", "agent_file_sha256", "source_dirty", "protocol"}
 
 
 class Failure(Exception):
@@ -49,6 +50,11 @@ def digest(path):
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             hasher.update(block)
     return hasher.hexdigest()
+
+
+def text_digest(path):
+    # Code identity across Git's LF/CRLF checkouts, not an exact file pin.
+    return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 class Codec:
@@ -86,12 +92,13 @@ class Codec:
 def inspect_host(codec_path, host_id):
     codec = Codec(codec_path)
     info = codec.call("describe")
-    if info.get("boundary") != "production_ProtocolUtil" or info.get("native_input") is not False:
+    if (info.get("boundary") != "production_ProtocolUtil" or info.get("native_input") is not False
+            or info.get("source_fingerprint") != SOURCE_FINGERPRINT):
         raise Failure("preflight", "expected record-only production codec")
     return dict(info, schema_version=1, host_id=host_id, os=platform.system(),
                 arch=platform.machine(), python=platform.python_version(),
                 codec=codec.path, codec_sha256=digest(codec.path),
-                agent_sha256=digest(__file__))
+                agent_sha256=text_digest(__file__), agent_file_sha256=digest(__file__))
 
 
 def validate_scenario(scenario):
@@ -253,7 +260,8 @@ def agent_run(codec_path, host_id):
         if job.get("fault") not in (None, *FAULTS):
             raise Failure("configuration", "unknown fault fixture")
         info = inspect_host(codec_path, host_id)
-        for field in ("codec_sha256", "source_commit", "source_digest", "agent_sha256", "os"):
+        for field in ("codec_sha256", "source_commit", "source_digest", "source_fingerprint",
+                      "agent_sha256", "agent_file_sha256", "os"):
             if info[field] != job["expected"][field]:
                 raise Failure("preflight", "host changed since preflight: " + field)
         codec = Codec(codec_path)
@@ -414,10 +422,12 @@ def validate_hosts(hosts):
             raise Failure("configuration", "unknown artifact expectation field")
         if expected.get("os") not in ("Windows", "Darwin", "Linux"):
             raise Failure("configuration", "expected host OS is required")
+        if expected.get("source_fingerprint") != SOURCE_FINGERPRINT:
+            raise Failure("configuration", "expected source fingerprint policy is required")
         if (not isinstance(expected.get("source_commit"), str)
                 or not re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", expected["source_commit"])):
             raise Failure("configuration", "expected Git commit fingerprint is required")
-        for field in ("source_digest", "codec_sha256", "agent_sha256"):
+        for field in ("source_digest", "codec_sha256", "agent_sha256", "agent_file_sha256"):
             if not isinstance(expected.get(field), str) or not re.fullmatch(r"[a-f0-9]{64}", expected[field]):
                 raise Failure("configuration", "expected artifact fingerprint missing/invalid: " + field)
         if "source_dirty" in expected and type(expected["source_dirty"]) is not bool:
@@ -702,7 +712,8 @@ def controller(args):
                                   expected={key: info[key] for key in EXPECTED_FIELDS}))
         validate_hosts(hosts)
         infos = [preflight(host, args.timeout) for host in hosts]
-        for field in ("source_commit", "source_digest", "protocol", "agent_sha256", "source_dirty"):
+        for field in ("source_commit", "source_digest", "source_fingerprint", "protocol",
+                      "agent_sha256", "source_dirty"):
             if infos[0][field] != infos[1][field]:
                 raise Failure("preflight", "paired build mismatch: " + field)
         if pair_mode and {info["os"] for info in infos} != {"Windows", "Darwin"}:

@@ -18,7 +18,7 @@ import tarfile
 import pair_test as pair
 
 META_FIELDS = {"schema_version", "os", "arch", "source_commit", "source_digest",
-               "source_dirty", "protocol", "boundary", "native_input", "files"}
+               "source_fingerprint", "source_dirty", "protocol", "boundary", "native_input", "files"}
 BUILD_FIELDS = META_FIELDS - {"schema_version", "files"}
 LIMITS = {"package.json": 32768, "pair_test.py": 262144, "smoke.json": 65536,
           "pair-codec": 10485760, "pair-codec.exe": 10485760}
@@ -38,6 +38,7 @@ def validate_metadata(meta, expected_commit):
             or meta["source_commit"] != expected_commit
             or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", expected_commit)
             or meta["source_dirty"] is not False or meta["native_input"] is not False
+            or meta["source_fingerprint"] != pair.SOURCE_FINGERPRINT
             or meta["boundary"] != "production_ProtocolUtil"):
         raise ValueError("invalid, dirty or mismatched package identity")
     if (not isinstance(meta["os"], str) or not isinstance(meta["arch"], str)
@@ -106,7 +107,7 @@ def unpack(archive_path, output, expected_commit):
         if sha(files[name]) != expected_hash:
             raise ValueError("package checksum mismatch: " + name)
     for name in ("pair_test.py", "smoke.json"):
-        if files[name] != (pair.HERE / name).read_bytes():
+        if files[name].replace(b"\r\n", b"\n") != (pair.HERE / name).read_bytes().replace(b"\r\n", b"\n"):
             raise ValueError("package differs from trusted checkout: " + name)
     # All validation finishes before the first destination write.
     output.mkdir(parents=True, mode=0o700)

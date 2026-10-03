@@ -76,6 +76,10 @@ python tools/pair-test/pair_test.py inspect --codec build-pair-ci/pair-codec.exe
 
 The verifier checks the checkout, commit, OS/arch, bounded flat regular files,
 file hashes and equality with the trusted agent/fixture **before writing**.
+Text identity uses the explicit `sha256-lf-v1` policy: only CRLF line endings
+are canonicalized to LF. Each package entry, executable and host-local agent
+also retains an exact raw-file hash. Cross-host comparison uses canonical code
+identity; a changed host-local file still fails its original raw hash pin.
 It rejects links, traversal, duplicates and existing output directories. It
 never runs the downloaded codec. After verification, `inspect` validates the
 actual executable; generate a host manifest from that local executable path.

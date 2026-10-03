@@ -13,10 +13,16 @@ set(PRODUCTION_SOURCES
     src/lib/base/XBase.cpp
     src/lib/io/XIO.cpp)
 set(CODEC_SOURCES)
-set(SOURCE_DIGEST "")
+set(SOURCE_DIGEST "sha256-lf-v1;")
+function(pair_text_sha256 path output)
+    file(READ "${path}" contents)
+    string(REPLACE "\r\n" "\n" contents "${contents}")
+    string(SHA256 digest "${contents}")
+    set(${output} "${digest}" PARENT_SCOPE)
+endfunction()
 foreach(source IN LISTS PRODUCTION_SOURCES)
     list(APPEND CODEC_SOURCES "${REPO_ROOT}/${source}")
-    file(SHA256 "${REPO_ROOT}/${source}" digest)
+    pair_text_sha256("${REPO_ROOT}/${source}" digest)
     string(APPEND SOURCE_DIGEST "${source}:${digest};")
 endforeach()
 file(GLOB_RECURSE CODEC_HEADERS CONFIGURE_DEPENDS RELATIVE "${REPO_ROOT}"
@@ -25,7 +31,7 @@ file(GLOB_RECURSE CODEC_HEADERS CONFIGURE_DEPENDS RELATIVE "${REPO_ROOT}"
     "${REPO_ROOT}/src/lib/arch/*.h")
 list(SORT CODEC_HEADERS)
 foreach(source IN LISTS CODEC_HEADERS)
-    file(SHA256 "${REPO_ROOT}/${source}" digest)
+    pair_text_sha256("${REPO_ROOT}/${source}" digest)
     string(APPEND SOURCE_DIGEST "${source}:${digest};")
 endforeach()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -34,7 +40,7 @@ foreach(source IN LISTS CODEC_HEADERS)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${REPO_ROOT}/${source}")
 endforeach()
 foreach(source IN ITEMS codec.cpp CMakeLists.txt)
-    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${source}" digest)
+    pair_text_sha256("${CMAKE_CURRENT_SOURCE_DIR}/${source}" digest)
     string(APPEND SOURCE_DIGEST "${source}:${digest};")
 endforeach()
 string(SHA256 SOURCE_DIGEST "${SOURCE_DIGEST}")
@@ -55,6 +61,7 @@ target_include_directories(pair-codec PRIVATE "${REPO_ROOT}/src/lib")
 target_compile_features(pair-codec PRIVATE cxx_std_14)
 target_compile_definitions(pair-codec PRIVATE NOLOGGING NDEBUG
     PAIR_SOURCE_COMMIT="${SOURCE_COMMIT}" PAIR_SOURCE_DIGEST="${SOURCE_DIGEST}"
+    PAIR_SOURCE_FINGERPRINT="sha256-lf-v1"
     PAIR_SOURCE_DIRTY=${SOURCE_DIRTY})
 if(WIN32)
     target_compile_definitions(pair-codec PRIVATE SYSAPI_WIN32 WINAPI_MSWINDOWS

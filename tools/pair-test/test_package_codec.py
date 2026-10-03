@@ -24,6 +24,7 @@ class PackageTests(unittest.TestCase):
         self.output = self.root / "unpacked"
         self.info = dict(os=platform.system(), arch=platform.machine(), source_commit="a" * 40,
                          source_digest="b" * 64, source_dirty=False, native_input=False,
+                         source_fingerprint=pair.SOURCE_FINGERPRINT,
                          boundary="production_ProtocolUtil", protocol=[1, 6])
         self.patcher = mock.patch.object(pair, "inspect_host", return_value=self.info)
         self.patcher.start()
@@ -56,6 +57,7 @@ class PackageTests(unittest.TestCase):
     def test_wrong_commit_dirty_or_os_rejected_before_write(self):
         for key, value in (("source_commit", "c" * 40), ("source_dirty", True),
                            ("os", "wrong-os"), ("arch", "wrong-arch"), ("arch", None),
+                           ("source_fingerprint", "old-policy"),
                            ("native_input", True)):
             with self.subTest(key=key):
                 altered = copy.deepcopy(self.info)
@@ -70,6 +72,24 @@ class PackageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             package.unpack(self.archive, self.output, "c" * 40)
         self.assertFalse(self.output.exists())
+
+    def test_trusted_source_may_differ_only_in_line_endings(self):
+        self.make_archive()
+        def crlf(members):
+            hashes = {}
+            for index, (member, data) in enumerate(members):
+                if member.name in ("pair_test.py", "smoke.json"):
+                    data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+                    members[index] = (member, data)
+                    hashes[member.name] = package.sha(data)
+            for index, (member, data) in enumerate(members):
+                if member.name == "package.json":
+                    meta = json.loads(data)
+                    meta["files"].update(hashes)
+                    members[index] = (member, json.dumps(meta).encode())
+        changed = self.rewrite(crlf)
+        result = package.unpack(changed, self.output, "a" * 40)
+        self.assertFalse(result["native_input"])
 
     def test_traversal_link_duplicate_and_oversize_rejected(self):
         self.make_archive()

@@ -18,6 +18,18 @@ SCENARIO = json.loads((pair.HERE / "smoke.json").read_text(encoding="utf-8"))
 
 
 class StateAndConfigTests(unittest.TestCase):
+    def test_text_identity_is_line_ending_independent_but_file_pin_is_exact(self):
+        with tempfile.TemporaryDirectory(prefix="keystitch-text-fingerprint-") as root:
+            lf = Path(root) / "lf.py"
+            crlf = Path(root) / "crlf.py"
+            changed = Path(root) / "changed.py"
+            lf.write_bytes(b"print('fixture')\n")
+            crlf.write_bytes(b"print('fixture')\r\n")
+            changed.write_bytes(b"print('different')\n")
+            self.assertEqual(pair.text_digest(lf), pair.text_digest(crlf))
+            self.assertNotEqual(pair.digest(lf), pair.digest(crlf))
+            self.assertNotEqual(pair.text_digest(lf), pair.text_digest(changed))
+
     def test_valid_scenario(self):
         pair.validate_scenario(SCENARIO)
 
@@ -78,10 +90,12 @@ class StateAndConfigTests(unittest.TestCase):
     def test_invalid_host_fingerprints_and_addresses_are_rejected(self):
         host = dict(host_id="first", transport="local", python="python", agent="agent.py", codec="codec",
                     expected=dict(os="Darwin", source_commit="a" * 40, source_digest="a" * 64,
-                                  codec_sha256="a" * 64, agent_sha256="a" * 64))
+                                  source_fingerprint=pair.SOURCE_FINGERPRINT,
+                                  codec_sha256="a" * 64, agent_sha256="a" * 64, agent_file_sha256="a" * 64))
         other = dict(host, host_id="second")
         pair.validate_hosts([host, other])
-        for field, value in (("codec_sha256", "missing"), ("source_commit", []),
+        for field, value in (("codec_sha256", "missing"), ("agent_file_sha256", "missing"),
+                             ("source_fingerprint", "old-policy"), ("source_commit", []),
                              ("source_dirty", "false"), ("protocol", [1, True])):
             case = copy.deepcopy(host)
             case["expected"][field] = value
@@ -185,7 +199,7 @@ class RealCodecAndProcessTests(unittest.TestCase):
         # Host identity is verified separately, not an expected artifact field.
         for current in (host, other):
             current["expected"] = {key: value for key, value in current["expected"].items()
-                                   if key in ("os", "source_commit", "source_digest", "codec_sha256", "agent_sha256")}
+                                   if key in pair.EXPECTED_FIELDS}
         other["expected"]["codec_sha256"] = "0" * 64
         done, result = self.run_controller(hosts={"schema_version": 1, "hosts": [host, other]})
         self.assertEqual(done.returncode, 1)
@@ -239,12 +253,28 @@ class RealCodecAndProcessTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         host = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(host["expected"]["codec_sha256"], pair.digest(CODEC))
-        self.assertEqual(host["expected"]["agent_sha256"], pair.digest(pair.__file__))
+        self.assertEqual(host["expected"]["agent_sha256"], pair.text_digest(pair.__file__))
+        self.assertEqual(host["expected"]["agent_file_sha256"], pair.digest(pair.__file__))
         self.assertEqual(host["transport"], "local")
         original = output.read_bytes()
         done = subprocess.run(args, capture_output=True, timeout=5)
         self.assertEqual(done.returncode, 1)
         self.assertEqual(output.read_bytes(), original)
+
+    def test_reformatted_agent_keeps_code_identity_but_fails_exact_host_pin(self):
+        copied = self.root / "pair_test.py"
+        original = Path(pair.__file__).read_bytes()
+        changed = (original.replace(b"\r\n", b"\n") if b"\r\n" in original
+                   else original.replace(b"\n", b"\r\n"))
+        copied.write_bytes(changed)
+        self.assertEqual(pair.text_digest(copied), pair.text_digest(pair.__file__))
+        self.assertNotEqual(pair.digest(copied), pair.digest(pair.__file__))
+        info = pair.inspect_host(CODEC, "file-pin-test")
+        host = dict(host_id="file-pin-test", transport="local", python=sys.executable,
+                    agent=str(copied), codec=str(CODEC),
+                    expected={key: info[key] for key in pair.EXPECTED_FIELDS})
+        with self.assertRaisesRegex(pair.Failure, "agent_file_sha256"):
+            pair.preflight(host, 5)
 
     def test_record_state_tampering_is_rejected(self):
         done, result = self.run_controller()
