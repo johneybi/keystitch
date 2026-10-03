@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
+# Keep the standalone Windows tool independent of a VC redistributable install.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 project(keystitch_pair_test LANGUAGES CXX)
 
 # Standalone, record-only test tool: no GUI, device APIs, Qt or OpenSSL.

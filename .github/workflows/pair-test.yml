@@ -58,6 +58,19 @@ jobs:
       - name: Save local two-process smoke report (Windows)
         if: runner.os == 'Windows'
         run: python tools/pair-test/pair_test.py run --codec build-pair/Release/pair-codec.exe --output pair-results
+      - name: Package tested standalone tools (Unix)
+        if: runner.os != 'Windows'
+        run: python tools/pair-test/package_codec.py pack --codec build-pair/pair-codec --output pair-tools.tar --expected-commit "${{ github.sha }}"
+      - name: Package tested standalone tools (Windows)
+        if: runner.os == 'Windows'
+        run: python tools/pair-test/package_codec.py pack --codec build-pair/Release/pair-codec.exe --output pair-tools.tar --expected-commit "${{ github.sha }}"
+      - name: Save tested standalone tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: pair-tools-${{ runner.os }}-${{ runner.arch }}
+          path: pair-tools.tar
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: always()
         with:

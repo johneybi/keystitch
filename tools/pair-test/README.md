@@ -55,7 +55,53 @@ Exit 0 means passed. Nonzero means failed; read `failure_stage` in `result.json`
 Tests without `PAIR_CODEC` skip native/process coverage; they are not a full pass.
 Local mode uses two processes on one host and sets `windows_mac_pair: false`.
 
-## Actual Windows/macOS pair
+## Prepare from CI without a local C++ toolchain
+
+The successful **Record-only paired test runner** workflow also saves
+`pair-tools-<OS>-<ARCH>` artifacts containing `pair-tools.tar`. Each tar contains
+only the tested codec, the Python agent, fixed fixture and a checksum/build
+manifest. Windows uses a statically linked MSVC runtime for this standalone
+tool; this does not change the product build or install a redistributable.
+
+Select the successful workflow for the **exact source commit** and matching OS
+and architecture. Obtain its artifact through authenticated GitHub tooling;
+do not use an unrelated run, untrusted download URL or a checksum as proof of
+authorship. Check out that same commit in the dedicated test worktree. Then run
+the verifier **from the checkout**, not a downloaded script:
+
+```powershell
+python tools/pair-test/package_codec.py unpack --archive C:/pair-download/pair-tools.tar --output build-pair-ci --expected-commit <FULL_COMMIT_SHA>
+python tools/pair-test/pair_test.py inspect --codec build-pair-ci/pair-codec.exe --host-id windows
+```
+
+The verifier checks the checkout, commit, OS/arch, bounded flat regular files,
+file hashes and equality with the trusted agent/fixture **before writing**.
+It rejects links, traversal, duplicates and existing output directories. It
+never runs the downloaded codec. After verification, `inspect` validates the
+actual executable; generate a host manifest from that local executable path.
+On Unix use `python3` and `build-pair-ci/pair-codec` instead. The tar preserves
+executable permissions despite the outer artifact ZIP's mode normalization.
+
+This prepares tooling only. It does not establish SSH access, change OS Remote
+Login/firewall settings, open a LAN listener or prove a Windows/Mac pair pass.
+Real cross-host execution remains a separately authorized step.
+
+## Codex-managed control versus SSH automation
+
+With both hosts connected to Codex, the coordinating chat can request commands
+in the existing Windows chat and read its results. This control path can prepare
+and inspect each host's tools without enabling an SSH server. It does not make
+the hosts share a filesystem or carry the test fixture's TCP traffic.
+
+For a Codex-managed pair run, launch bounded one-shot jobs on each host and
+collect their matching run IDs, source fingerprints, complete event traces and
+exit results. Do not infer a pair pass from messages saying the jobs were sent.
+The current `run --host-manifest` CLI automates remote processes through SSH;
+it does not yet automate split, chat-controlled jobs. SSH is an optional control
+transport, not a requirement of the product or of protocol testing. Do not enable
+Remote Login/OpenSSH or change firewall rules merely to prepare the test tools.
+
+## Actual Windows/macOS pair using an existing SSH controller
 
 1. Put the **same commit** in dedicated checkouts on both hosts and build the
    standalone codec on each. Reconfigure CMake after changing commits: Git
