@@ -122,6 +122,11 @@ source fix and expanded Input Leap pipeline tests, still without installation.
 
 ## Next decision
 
+The [native transition ordering increment](../../doc/ime-native-transition-ordering-20261030.md)
+follows the user-authorized A/B comparison. It replaces B's fixed delay with
+bounded observation/FIFO handling; its source-stability guard is not an IME
+acknowledgement and requires a new real-input comparison.
+
 The [explicit F19 backend increment](../../doc/ime-switch-backends-20261030.md)
 adds a default-preserving, opt-in native shortcut path. It has only offline
 coverage so far; it does not enable a backend or authorize live input tests.

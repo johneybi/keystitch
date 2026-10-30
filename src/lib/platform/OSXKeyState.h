@@ -20,10 +20,12 @@
 
 #include "inputleap/KeyState.h"
 #include "platform/OSXInputSourceShortcut.h"
+#include "platform/OSXInputSourceTransition.h"
 
 #include <Carbon/Carbon.h>
 
 #include <map>
+#include <deque>
 #include <set>
 #include <string>
 #include <vector>
@@ -95,17 +97,21 @@ public:
     //@}
 
     // IKeyState overrides
-    virtual bool fakeCtrlAltDel();
-    virtual bool fakeMediaKey(KeyID id);
-    virtual KeyModifierMask pollActiveModifiers() const;
-    virtual std::int32_t pollActiveGroup() const;
-    virtual void pollPressedKeys(KeyButtonSet& pressedKeys) const;
+    bool fakeCtrlAltDel() override;
+    bool fakeMediaKey(KeyID id) override;
+    KeyModifierMask pollActiveModifiers() const override;
+    std::int32_t pollActiveGroup() const override;
+    void pollPressedKeys(KeyButtonSet& pressedKeys) const override;
+    void fakeAllKeysUp() override;
 
     CGEventFlags getModifierStateAsOSXFlags();
+    // Keep the short native barrier progressing during sustained pointer
+    // traffic; clicks/scrolls must not overtake already buffered key events.
+    void prepareForPointerEvent(bool changesTarget);
 protected:
     // KeyState overrides
-    virtual void getKeyMap(inputleap::KeyMap& keyMap);
-    virtual void fakeKey(const Keystroke& keystroke);
+    void getKeyMap(inputleap::KeyMap& keyMap) override;
+    void fakeKey(const Keystroke& keystroke) override;
 
     void postHIDVirtualKey(std::uint8_t virtualKeyCode, bool postDown);
     // Separate state accounting from OS delivery so tests can use an inert sink.
@@ -121,6 +127,11 @@ protected:
     virtual OSXInputSourceBackend inputSourceBackend() const;
     virtual OSXInputSourceShortcutResult readInputSourceShortcut() const;
     virtual bool postInputSourceShortcut(const std::vector<OSXInputSourceShortcutEvent>& events);
+    virtual std::string readSelectedInputSourceId() const;
+    virtual double nativeSwitchTime() const;
+    virtual bool startNativeSwitchPoll();
+    virtual void stopNativeSwitchPoll();
+    void pollNativeSwitch();
 
 private:
     class KeyResource;
@@ -184,6 +195,22 @@ private:
     // Physical sides must remain distinct when both sides of a modifier are held.
     std::set<std::uint8_t> m_pressedModifiers;
     OSXInputSourceBackend m_inputSourceBackend;
+    IEventQueue* m_nativeEvents = nullptr;
+    EventQueueTimer* m_nativeTimer = nullptr;
+    OSXInputSourceTransition m_nativeTransition;
+    std::deque<Keystroke> m_nativePendingKeys;
+    std::set<std::uint8_t> m_postedKeys;
+    bool m_nativeWaiting = false;
+    bool m_nativeDraining = false;
+    bool m_nativeCleaningUp = false;
+    bool m_nativeFirstKey = false;
+    std::uint64_t m_nativeSequence = 0;
+    double m_nativeRequestedAt = 0;
+    double m_nativePostedAt = 0;
+    double m_nativeNextPoll = 0;
+    void finishNativeSwitch(const char* reason);
+    void drainNativeKeys();
+    void dispatchKey(const Keystroke& keystroke);
     void switchInputSourceFromF19();
     void postUnicodeString(const std::u16string& str);
     void postBackspace(int count);

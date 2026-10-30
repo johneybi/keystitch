@@ -7,6 +7,7 @@
 #include "platform/OSXKeyState.h"
 #include "server/KeyRemapper.h"
 #include "test/mock/inputleap/MockEventQueue.h"
+#include "base/EventQueue.h"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -42,6 +43,21 @@ public:
     bool shortcutPostingSucceeds = true;
     mutable int shortcutReads = 0;
     std::vector<std::vector<OSXInputSourceShortcutEvent>> attemptedShortcutPlans;
+    std::string nativeSource = kOSXAppleRomanABC;
+    mutable int nativeSourceReads = 0;
+    double now = 100;
+    bool timerAvailable = true;
+    bool realTimer = false;
+    bool pollArmed = false;
+    int pollsStarted = 0;
+    int pollsStopped = 0;
+
+    void advance(double seconds) { now += seconds; pollNativeSwitch(); }
+    void completeNative() {
+        nativeSource = nativeSource == kOSXAppleRomanABC ? kOSXAppleKorean : kOSXAppleRomanABC;
+        advance(0.004);
+        advance(0.021);
+    }
 
     void dispatch(std::uint8_t key, bool down, bool repeat = false) {
         // Production maps macOS virtual keys to buttons with offset one.
@@ -131,6 +147,19 @@ protected:
     }
 
     OSXInputSourceBackend inputSourceBackend() const override { return backend; }
+    std::string readSelectedInputSourceId() const override { ++nativeSourceReads; return nativeSource; }
+    double nativeSwitchTime() const override { return now; }
+    bool startNativeSwitchPoll() override {
+        ++pollsStarted;
+        if (realTimer) return pollArmed = OSXKeyState::startNativeSwitchPoll();
+        pollArmed = timerAvailable;
+        return timerAvailable;
+    }
+    void stopNativeSwitchPoll() override {
+        if (pollArmed) ++pollsStopped;
+        if (realTimer) OSXKeyState::stopNativeSwitchPoll();
+        pollArmed = false;
+    }
     OSXInputSourceShortcutResult readInputSourceShortcut() const override {
         ++shortcutReads;
         trace.push_back("shortcut-read");
@@ -370,7 +399,9 @@ TEST_F(OSXF19DispatchTests, nativeShortcutRequestsConfiguredChordBeforeTheNextKe
     keys.backend = OSXInputSourceBackend::NativeShortcut;
     tap();
     letter();
-    EXPECT_EQ((std::vector<std::string>{"shortcut-read", "shortcut-post", "settle", "key-down", "key-up"}), keys.trace);
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.completeNative();
+    EXPECT_EQ((std::vector<std::string>{"shortcut-read", "shortcut-post", "key-down", "key-up"}), keys.trace);
     EXPECT_TRUE(keys.offsets.empty());
     ASSERT_EQ(1u, keys.attemptedShortcutPlans.size());
     const auto& plan = keys.attemptedShortcutPlans[0];
@@ -404,7 +435,7 @@ TEST_F(OSXF19DispatchTests, nativeShortcutRepeatAndReleaseAreConsumedWithoutAnot
     EXPECT_TRUE(keys.fakeKeyUp(100));
     EXPECT_EQ(1, keys.shortcutReads);
     EXPECT_EQ(1u, keys.attemptedShortcutPlans.size());
-    EXPECT_EQ(1, keys.settles);
+    EXPECT_EQ(0, keys.settles);
     EXPECT_TRUE(keys.offsets.empty());
     EXPECT_TRUE(keys.deliveries.empty());
     EXPECT_EQ(0, keys.getKeyState(kVK_F19 + 1));
@@ -418,6 +449,8 @@ TEST_F(OSXF19DispatchTests, nativeConfiguredF19PreservesFunctionFlagWithoutRecur
     keys.fakeKeyDown(kKeyF19, 0, 100);
     EXPECT_TRUE(keys.fakeKeyUp(100));
     letter();
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.completeNative();
     EXPECT_EQ(1, keys.shortcutReads);
     ASSERT_EQ(1u, keys.attemptedShortcutPlans.size());
     const auto& plan = keys.attemptedShortcutPlans[0];
@@ -429,7 +462,7 @@ TEST_F(OSXF19DispatchTests, nativeConfiguredF19PreservesFunctionFlagWithoutRecur
     EXPECT_TRUE(plan[0].down);
     EXPECT_FALSE(plan[1].down);
     EXPECT_TRUE(keys.offsets.empty());
-    EXPECT_EQ(1, keys.settles);
+    EXPECT_EQ(0, keys.settles);
     ASSERT_EQ(2u, keys.deliveries.size());
     for (const auto& event : keys.deliveries) {
         EXPECT_EQ(kVK_ANSI_A, event.key);
@@ -538,6 +571,7 @@ TEST_F(OSXF19DispatchTests, nativeRemapperPipelineDoesNotChangeTheFixtureSourceO
             keys.relay(remapper.remapKeyUp("mac", sourceKey, 0, 100));
             keys.relay(remapper.remapKeyDown("mac", 'a', 0, 101));
             keys.relay(remapper.remapKeyUp("mac", 'a', 0, 101));
+            keys.completeNative();
             ASSERT_EQ(2u, keys.deliveries.size());
             EXPECT_EQ(kOSXAppleRomanABC, keys.deliveries[0].source);
             EXPECT_EQ(0u, keys.deliveries[0].flags);
@@ -548,6 +582,223 @@ TEST_F(OSXF19DispatchTests, nativeRemapperPipelineDoesNotChangeTheFixtureSourceO
     EXPECT_EQ(64, keys.shortcutReads);
     EXPECT_EQ(64u, keys.attemptedShortcutPlans.size());
     EXPECT_TRUE(keys.offsets.empty());
+}
+
+TEST_F(OSXF19DispatchTests, nativeBurstWaitsForObservedChangeInsteadOfTheOld75Milliseconds)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap();
+    for (int i = 0; i < 4; ++i) letter();
+    keys.advance(0.075);
+    EXPECT_TRUE(keys.deliveries.empty());
+    EXPECT_TRUE(keys.pollArmed);
+    keys.advance(0.075);
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.nativeSource = kOSXAppleKorean;
+    keys.advance(0.004);
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.advance(0.021);
+    ASSERT_EQ(8u, keys.deliveries.size());
+    for (unsigned i = 0; i < keys.deliveries.size(); ++i) {
+        EXPECT_EQ(kVK_ANSI_A, keys.deliveries[i].key);
+        EXPECT_EQ(i % 2 == 0, keys.deliveries[i].down);
+        EXPECT_EQ(0u, keys.deliveries[i].flags);
+    }
+    EXPECT_FALSE(keys.pollArmed);
+    EXPECT_EQ(0, keys.settles);
+    EXPECT_TRUE(keys.offsets.empty());
+}
+
+TEST_F(OSXF19DispatchTests, nativeBufferedModifiersRepeatsAndReleaseKeepTheirOriginalOrder)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap();
+    keys.dispatch(kVK_Shift, true);
+    keys.dispatch(kVK_ANSI_A, true);
+    keys.dispatch(kVK_ANSI_A, true, true);
+    keys.dispatch(kVK_ANSI_A, false);
+    keys.dispatch(kVK_Shift, false);
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.completeNative();
+    ASSERT_EQ(5u, keys.deliveries.size());
+    EXPECT_EQ(kVK_Shift, keys.deliveries.front().key);
+    EXPECT_TRUE(keys.deliveries.front().down);
+    for (int i = 0; i < 4; ++i) EXPECT_EQ(kCGEventFlagMaskShift, keys.deliveries[i].flags);
+    EXPECT_TRUE(keys.deliveries[1].down);
+    EXPECT_TRUE(keys.deliveries[2].down);
+    EXPECT_FALSE(keys.deliveries[3].down);
+    EXPECT_FALSE(keys.deliveries[4].down);
+    EXPECT_EQ(0u, keys.deliveries[4].flags);
+    EXPECT_EQ(0u, keys.getModifierStateAsOSXFlags());
+}
+
+TEST_F(OSXF19DispatchTests, nativeBackToBackTogglesDoNotOvertakeTheCharactersBetweenThem)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap(); letter(); tap(); letter();
+    EXPECT_EQ(1u, keys.attemptedShortcutPlans.size());
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.completeNative();
+    EXPECT_EQ(2u, keys.attemptedShortcutPlans.size());
+    EXPECT_EQ(2u, keys.deliveries.size());
+    EXPECT_TRUE(keys.pollArmed);
+    keys.completeNative();
+    EXPECT_EQ(4u, keys.deliveries.size());
+    EXPECT_FALSE(keys.pollArmed);
+    EXPECT_EQ((std::vector<std::string>{"shortcut-read", "shortcut-post", "key-down", "key-up",
+        "shortcut-read", "shortcut-post", "key-down", "key-up"}), keys.trace);
+    EXPECT_TRUE(keys.offsets.empty());
+}
+
+TEST_F(OSXF19DispatchTests, nativeUnconfirmedTimeoutReleasesOriginalPairsWithoutAFallback)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap(); letter();
+    keys.advance(0.301);
+    ASSERT_EQ(2u, keys.deliveries.size());
+    EXPECT_TRUE(keys.deliveries[0].down);
+    EXPECT_FALSE(keys.deliveries[1].down);
+    EXPECT_EQ(kOSXAppleRomanABC, keys.nativeSource);
+    EXPECT_FALSE(keys.pollArmed);
+    EXPECT_EQ(1u, keys.attemptedShortcutPlans.size());
+    EXPECT_TRUE(keys.offsets.empty());
+    letter();
+    EXPECT_EQ(4u, keys.deliveries.size());
+}
+
+TEST_F(OSXF19DispatchTests, nativeDeadlineIsCheckedOnNewKeysEvenWithoutTimerCallbacks)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap(); letter();
+    // Simulate a busy EventQueue that does not service timer events.
+    keys.now += 0.301;
+    keys.dispatch(kVK_ANSI_A, true);
+    ASSERT_EQ(3u, keys.deliveries.size());
+    EXPECT_TRUE(keys.deliveries[0].down);
+    EXPECT_FALSE(keys.deliveries[1].down);
+    EXPECT_TRUE(keys.deliveries[2].down);
+    keys.dispatch(kVK_ANSI_A, false);
+    EXPECT_EQ(4u, keys.deliveries.size());
+    EXPECT_FALSE(keys.pollArmed);
+}
+
+TEST_F(OSXF19DispatchTests, nativeQueueLimitDoesNotLoseKeysOrWaitForever)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap();
+    for (int i = 0; i < 130; ++i) letter();
+    ASSERT_EQ(260u, keys.deliveries.size());
+    for (unsigned i = 0; i < keys.deliveries.size(); ++i) EXPECT_EQ(i % 2 == 0, keys.deliveries[i].down);
+    EXPECT_FALSE(keys.pollArmed);
+    EXPECT_TRUE(keys.offsets.empty());
+}
+
+TEST_F(OSXF19DispatchTests, nativeCleanupDropsUndeliveredKeysAndReleasesOnlyPreviouslyPostedDowns)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.fakeKeyDown('a', 0, 101);
+    keys.fakeKeyDown(kKeyF19, 0, 100);
+    keys.fakeKeyUp(100);
+    keys.fakeKeyUp(101); // Buffered up for the already-posted A down.
+    keys.fakeKeyDown(kKeyShift_L, KeyModifierShift, 102);
+    keys.fakeKeyDown('a', KeyModifierShift, 103);
+    ASSERT_EQ(1u, keys.deliveries.size());
+    keys.fakeAllKeysUp();
+    ASSERT_EQ(2u, keys.deliveries.size());
+    EXPECT_EQ(kVK_ANSI_A, keys.deliveries[1].key);
+    EXPECT_FALSE(keys.deliveries[1].down);
+    EXPECT_EQ(0u, keys.deliveries[1].flags);
+    EXPECT_FALSE(keys.pollArmed);
+    EXPECT_EQ(0u, keys.getModifierStateAsOSXFlags());
+    EXPECT_EQ(0u, keys.getActiveModifiers());
+    keys.completeNative(); // A stale poll cannot resurrect discarded input.
+    EXPECT_EQ(2u, keys.deliveries.size());
+    keys.fakeKeyDown(kKeyF19, 0, 100);
+    keys.fakeKeyUp(100);
+    keys.fakeKeyDown('a', 0, 101);
+    keys.fakeKeyUp(101);
+    keys.completeNative();
+    EXPECT_EQ(4u, keys.deliveries.size());
+    EXPECT_EQ(2u, keys.attemptedShortcutPlans.size());
+}
+
+TEST_F(OSXF19DispatchTests, nativeMissingSourceOrTimerCannotPostAnUntrackedShortcut)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.nativeSource.clear();
+    tap(); letter();
+    EXPECT_TRUE(keys.attemptedShortcutPlans.empty());
+    EXPECT_EQ(2u, keys.deliveries.size());
+    keys.nativeSource = kOSXAppleRomanABC;
+    keys.timerAvailable = false;
+    tap(); letter();
+    EXPECT_TRUE(keys.attemptedShortcutPlans.empty());
+    EXPECT_EQ(4u, keys.deliveries.size());
+    EXPECT_TRUE(keys.offsets.empty());
+    EXPECT_FALSE(keys.pollArmed);
+}
+
+TEST_F(OSXF19DispatchTests, nativePollingProgressesDuringPointerTrafficWithoutTimerCallbacks)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap(); letter();
+    keys.nativeSource = kOSXAppleKorean;
+    keys.now += 0.004;
+    keys.prepareForPointerEvent(false);
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.now += 0.021;
+    keys.prepareForPointerEvent(false);
+    EXPECT_EQ(2u, keys.deliveries.size());
+    EXPECT_FALSE(keys.pollArmed);
+}
+
+TEST_F(OSXF19DispatchTests, nativeQueuedCharactersAndTogglesCannotBeOvertakenByAClick)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap(); letter(); tap(); letter();
+    keys.prepareForPointerEvent(true);
+    keys.trace.push_back("pointer-action");
+    EXPECT_EQ(4u, keys.deliveries.size());
+    EXPECT_EQ(2u, keys.attemptedShortcutPlans.size());
+    EXPECT_FALSE(keys.pollArmed);
+    EXPECT_EQ((std::vector<std::string>{"shortcut-read", "shortcut-post", "key-down", "key-up",
+        "shortcut-read", "shortcut-post", "key-down", "key-up", "pointer-action"}), keys.trace);
+    keys.completeNative();
+    EXPECT_EQ(4u, keys.deliveries.size());
+    EXPECT_TRUE(keys.offsets.empty());
+}
+
+TEST(OSXNativeTransitionTimerTests, realEventQueueDrivesAndCancelsTheProductionTimerAdapter)
+{
+    EventQueue queue;
+    InertF19KeyState keys(&queue);
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.realTimer = true;
+    keys.dispatch(kVK_F19, true);
+    keys.dispatch(kVK_F19, false);
+    keys.dispatch(kVK_ANSI_A, true);
+    keys.dispatch(kVK_ANSI_A, false);
+    keys.nativeSource = kOSXAppleKorean;
+    keys.now += 0.004;
+    Event event;
+    ASSERT_TRUE(queue.getEvent(event, 0.100));
+    EXPECT_EQ(EventType::TIMER, event.getType());
+    EXPECT_TRUE(queue.dispatchEvent(event));
+    Event::deleteData(event);
+    EXPECT_TRUE(keys.deliveries.empty());
+    keys.now += 0.021;
+    ASSERT_TRUE(queue.getEvent(event, 0.100));
+    EXPECT_TRUE(queue.dispatchEvent(event));
+    Event::deleteData(event);
+    EXPECT_EQ(2u, keys.deliveries.size());
+    EXPECT_FALSE(keys.pollArmed);
+    EXPECT_FALSE(queue.getEvent(event, 0.010));
+    keys.dispatch(kVK_F19, true);
+    keys.dispatch(kVK_F19, false);
+    keys.dispatch(kVK_ANSI_A, true);
+    keys.fakeAllKeysUp();
+    EXPECT_FALSE(queue.getEvent(event, 0.010));
+    EXPECT_EQ(2u, keys.deliveries.size());
 }
 
 } // namespace

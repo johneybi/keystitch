@@ -23,12 +23,14 @@
 #include "arch/Arch.h"
 #include "base/Log.h"
 #include "base/Time.h"
+#include "base/EventQueueTimer.h"
 
 #include <Carbon/Carbon.h>
 #include <CoreServices/CoreServices.h>
 #include <dispatch/dispatch.h>
 #include <IOKit/hidsystem/IOHIDLib.h>
 #include <cstdlib>
+#include <chrono>
 
 namespace inputleap {
 
@@ -223,19 +225,20 @@ static const KeyEntry    s_controlKeys[] = {
 //
 
 OSXKeyState::OSXKeyState(IEventQueue* events) :
-    KeyState(events)
+    KeyState(events), m_nativeEvents(events)
 {
     init();
 }
 
 OSXKeyState::OSXKeyState(IEventQueue* events, inputleap::KeyMap& keyMap) :
-    KeyState(events, keyMap)
+    KeyState(events, keyMap), m_nativeEvents(events)
 {
     init();
 }
 
 OSXKeyState::~OSXKeyState()
 {
+    stopNativeSwitchPoll();
 }
 
 void
@@ -665,6 +668,8 @@ static std::uint16_t mapVirtualKeyToCharCode(std::uint8_t vk, bool shift)
 
 void OSXKeyState::postHIDVirtualKey(const std::uint8_t virtualKeyCode, const bool postDown)
 {
+    if (postDown) m_postedKeys.insert(virtualKeyCode);
+    else m_postedKeys.erase(virtualKeyCode);
     switch (virtualKeyCode)
     {
     case kVK_Shift:
@@ -723,6 +728,120 @@ OSXInputSourceBackend OSXKeyState::inputSourceBackend() const
     return m_inputSourceBackend;
 }
 
+std::string OSXKeyState::readSelectedInputSourceId() const
+{
+    return runOnMainThread([]() {
+        std::string result;
+        TISInputSourceRef source = TISCopyCurrentKeyboardInputSource();
+        if (source != nullptr) {
+            auto value = TISGetInputSourceProperty(source, kTISPropertyInputSourceID);
+            char buffer[512];
+            if (value != nullptr && CFGetTypeID(value) == CFStringGetTypeID()
+                && CFStringGetCString(static_cast<CFStringRef>(value), buffer,
+                    sizeof(buffer), kCFStringEncodingUTF8)) result = buffer;
+            CFRelease(source);
+        }
+        return result;
+    });
+}
+
+double OSXKeyState::nativeSwitchTime() const
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+bool OSXKeyState::startNativeSwitchPoll()
+{
+    if (m_nativeTimer != nullptr) return true;
+    m_nativeTimer = m_nativeEvents->newTimer(0.004, nullptr);
+    if (m_nativeTimer == nullptr) return false;
+    m_nativeEvents->add_handler(EventType::TIMER, m_nativeTimer,
+        [this](const auto&) { pollNativeSwitch(); });
+    return true;
+}
+
+void OSXKeyState::stopNativeSwitchPoll()
+{
+    if (m_nativeTimer == nullptr) return;
+    m_nativeEvents->remove_handler(EventType::TIMER, m_nativeTimer);
+    m_nativeEvents->deleteTimer(m_nativeTimer);
+    m_nativeTimer = nullptr;
+}
+
+void OSXKeyState::pollNativeSwitch()
+{
+    if (!m_nativeWaiting || nativeSwitchTime() < m_nativeNextPoll) return;
+    const auto source = readSelectedInputSourceId();
+    const double now = nativeSwitchTime();
+    m_nativeNextPoll = now + 0.004;
+    const auto previous = m_nativeTransition.candidate();
+    const auto result = m_nativeTransition.observe(source, now);
+    if (!m_nativeTransition.candidate().empty() && previous != m_nativeTransition.candidate()) {
+        LOG_INFO("F19 native source-observed seq=%llu elapsed_ms=%.3f source=%s (IME unverified)",
+            static_cast<unsigned long long>(m_nativeSequence), (now - m_nativePostedAt) * 1000,
+            m_nativeTransition.candidate().c_str());
+    }
+    if (result == OSXInputSourceTransition::Result::Changed) finishNativeSwitch("source-stable");
+    else if (result == OSXInputSourceTransition::Result::TimedOut) finishNativeSwitch("timeout-unconfirmed");
+}
+
+void OSXKeyState::finishNativeSwitch(const char* reason)
+{
+    if (!m_nativeWaiting) return;
+    m_nativeWaiting = false;
+    stopNativeSwitchPoll();
+    const double elapsed = (nativeSwitchTime() - m_nativePostedAt) * 1000;
+    if (std::string(reason) == "source-stable") {
+        LOG_INFO("F19 native barrier seq=%llu reason=%s elapsed_ms=%.3f queued=%zu (IME unverified)",
+            static_cast<unsigned long long>(m_nativeSequence), reason, elapsed, m_nativePendingKeys.size());
+    } else {
+        // Preserve characters and key-up order at the hard limit, never leave
+        // input stuck indefinitely or silently select a different backend.
+        LOG_WARN("F19 native barrier seq=%llu reason=%s elapsed_ms=%.3f queued=%zu; releasing original keys without IME confirmation",
+            static_cast<unsigned long long>(m_nativeSequence), reason, elapsed, m_nativePendingKeys.size());
+    }
+    drainNativeKeys();
+}
+
+void OSXKeyState::drainNativeKeys()
+{
+    if (m_nativeDraining) return;
+    m_nativeDraining = true;
+    while (!m_nativeWaiting && !m_nativePendingKeys.empty()) {
+        const auto key = m_nativePendingKeys.front();
+        m_nativePendingKeys.pop_front();
+        dispatchKey(key);
+    }
+    m_nativeDraining = false;
+}
+
+void OSXKeyState::prepareForPointerEvent(bool changesTarget)
+{
+    pollNativeSwitch();
+    if (changesTarget) {
+        // Bounded by the queue cap. Include queued toggles so a later switch
+        // cannot leave old-field characters waiting behind this pointer action.
+        while (m_nativeWaiting) finishNativeSwitch("pointer-action-unconfirmed");
+    }
+}
+
+void OSXKeyState::fakeAllKeysUp()
+{
+    m_nativeWaiting = false;
+    m_nativeFirstKey = false;
+    stopNativeSwitchPoll();
+    const auto discarded = m_nativePendingKeys.size();
+    m_nativePendingKeys.clear();
+    if (discarded != 0) LOG_INFO("F19 native cleanup discarded=%zu undelivered keystrokes", discarded);
+    m_nativeCleaningUp = true;
+    KeyState::fakeAllKeysUp();
+    // A buffered key-up may already have cleared KeyState's shadow count.
+    // Release that previously posted down, but never an undelivered down.
+    const auto remaining = m_postedKeys;
+    for (auto key : remaining) postHIDVirtualKey(key, false);
+    m_nativeCleaningUp = false;
+}
+
 OSXInputSourceShortcutResult OSXKeyState::readInputSourceShortcut() const
 {
     CFPropertyListRef pref = runOnMainThread([]() {
@@ -774,6 +893,7 @@ void OSXKeyState::switchInputSourceFromF19()
 {
     const auto backend = inputSourceBackend();
     if (backend == OSXInputSourceBackend::NativeShortcut) {
+        m_nativeRequestedAt = nativeSwitchTime();
         LOG_INFO("F19 transition backend=native-shortcut requested (IME readiness unverified)");
         if (!m_pressedModifiers.empty()) {
             LOG_WARN("F19 native shortcut rejected: synthetic modifiers held; no fallback");
@@ -785,14 +905,31 @@ void OSXKeyState::switchInputSourceFromF19()
             return;
         }
         const auto events = MakeOSXInputSourceShortcutEvents(result.shortcut, getModifierStateAsOSXFlags());
-        if (events.empty() || !postInputSourceShortcut(events)) {
+        const auto before = readSelectedInputSourceId();
+        if (events.empty() || before.empty() || !startNativeSwitchPoll()) {
+            LOG_WARN("F19 native shortcut unavailable: source or timer unavailable; no fallback");
+            return;
+        }
+        if (!postInputSourceShortcut(events)) {
+            stopNativeSwitchPoll();
             LOG_WARN("F19 native shortcut dispatch failed; no fallback");
             return;
         }
+        ++m_nativeSequence;
+        m_nativePostedAt = nativeSwitchTime();
+        m_nativeNextPoll = m_nativePostedAt;
+        m_nativeTransition.begin(before, m_nativePostedAt);
+        m_nativeWaiting = true;
+        m_nativeFirstKey = true;
         LOG_INFO("F19 native shortcut posted key=%u flags=0x%llx (activation and IME state unverified)",
                  static_cast<unsigned int>(result.shortcut.keyCode),
                  static_cast<unsigned long long>(result.shortcut.modifiers));
-        waitForInputSourceSettling();
+        const auto epoch = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        LOG_INFO("F19 native queued-switch seq=%llu request_ms=%.3f mono_ms=%.3f epoch_ms=%lld before=%s",
+            static_cast<unsigned long long>(m_nativeSequence),
+            (m_nativePostedAt - m_nativeRequestedAt) * 1000, m_nativePostedAt * 1000,
+            static_cast<long long>(epoch), before.c_str());
         return;
     }
     if (backend != OSXInputSourceBackend::DirectTIS) {
@@ -834,6 +971,21 @@ void OSXKeyState::postUnicodeString(const std::u16string& str)
 void
 OSXKeyState::fakeKey(const Keystroke& keystroke)
 {
+    if (!m_nativeCleaningUp) {
+        // EventQueue timers run only when its input buffer is empty. Poll here
+        // too so sustained rapid input cannot starve the transition deadline.
+        pollNativeSwitch();
+        if (m_nativeWaiting || !m_nativePendingKeys.empty()) {
+            m_nativePendingKeys.push_back(keystroke);
+            if (m_nativePendingKeys.size() >= 256) finishNativeSwitch("queue-limit-unconfirmed");
+            return;
+        }
+    }
+    dispatchKey(keystroke);
+}
+
+void OSXKeyState::dispatchKey(const Keystroke& keystroke)
+{
     switch (keystroke.m_type) {
     case Keystroke::kButton: {
 
@@ -855,6 +1007,18 @@ OSXKeyState::fakeKey(const Keystroke& keystroke)
             break;
         }
 
+        if (m_nativeCleaningUp && !keyDown && m_postedKeys.count(virtualKey) == 0) break;
+        if (keyDown && m_nativeFirstKey && virtualKey != kVK_Shift && virtualKey != kVK_RightShift
+            && virtualKey != kVK_Control && virtualKey != kVK_RightControl
+            && virtualKey != kVK_Option && virtualKey != kVK_RightOption
+            && virtualKey != kVK_Command && virtualKey != kVK_RightCommand
+            && virtualKey != kVK_CapsLock) {
+            m_nativeFirstKey = false;
+            LOG_INFO("F19 native first-key seq=%llu elapsed_ms=%.3f request_elapsed_ms=%.3f (IME unverified)",
+                static_cast<unsigned long long>(m_nativeSequence),
+                (nativeSwitchTime() - m_nativePostedAt) * 1000,
+                (nativeSwitchTime() - m_nativeRequestedAt) * 1000);
+        }
         postHIDVirtualKey(virtualKey, keyDown);
 
         break;

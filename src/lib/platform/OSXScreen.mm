@@ -495,6 +495,7 @@ OSXScreen::fakeMouseButton(ButtonID id, bool press)
 	if (index >= NumButtonIDs) {
 		return;
 	}
+    m_keyState->prepareForPointerEvent(true);
 
 	CGPoint pos;
 	if (!m_cursorPosValid) {
@@ -600,6 +601,7 @@ void OSXScreen::get_drop_target_thread()
 
 void OSXScreen::fakeMouseMove(std::int32_t x, std::int32_t y)
 {
+    m_keyState->prepareForPointerEvent(false);
 	if (m_fakeDraggingStarted) {
 		m_buttonState.set(0, kMouseButtonDown);
 	}
@@ -623,6 +625,7 @@ void OSXScreen::fakeMouseMove(std::int32_t x, std::int32_t y)
 
 void OSXScreen::fakeMouseRelativeMove(std::int32_t dx, std::int32_t dy) const
 {
+    m_keyState->prepareForPointerEvent(false);
 	// OS X does not appear to have a fake relative mouse move function.
 	// simulate it by getting the current mouse position and adding to
 	// that.  this can yield the wrong answer but there's not much else
@@ -648,6 +651,7 @@ void OSXScreen::fakeMouseRelativeMove(std::int32_t dx, std::int32_t dy) const
 void OSXScreen::fakeMouseWheel(std::int32_t xDelta, std::int32_t yDelta) const
 {
 	if (xDelta != 0 || yDelta != 0) {
+        m_keyState->prepareForPointerEvent(true);
 		// create a scroll event, post it and release it.  not sure if kCGScrollEventUnitLine
 		// is the right choice here over kCGScrollEventUnitPixel
 		CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
