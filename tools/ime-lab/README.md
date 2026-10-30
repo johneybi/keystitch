@@ -122,6 +122,10 @@ source fix and expanded Input Leap pipeline tests, still without installation.
 
 ## Next decision
 
+The [explicit F19 backend increment](../../doc/ime-switch-backends-20261030.md)
+adds a default-preserving, opt-in native shortcut path. It has only offline
+coverage so far; it does not enable a backend or authorize live input tests.
+
 The [offline F19 dispatcher increment](../../doc/ime-f19-dispatch-offline-20261030.md)
 extends the real remapper/key-state path through the macOS F19 handler with
 inert OS boundaries. Its tests do not launch this lab or validate real IME text.

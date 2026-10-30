@@ -37,10 +37,19 @@ public:
     mutable std::vector<std::string> trace;
     std::vector<CGEventFlags> flagsAtSelection;
     int settles = 0;
+    OSXInputSourceBackend backend = OSXInputSourceBackend::DirectTIS;
+    OSXInputSourceShortcutResult shortcut{true, {kVK_Space, kCGEventFlagMaskControl}, "fixture"};
+    bool shortcutPostingSucceeds = true;
+    mutable int shortcutReads = 0;
+    std::vector<std::vector<OSXInputSourceShortcutEvent>> attemptedShortcutPlans;
 
     void dispatch(std::uint8_t key, bool down, bool repeat = false) {
         // Production maps macOS virtual keys to buttons with offset one.
         OSXKeyState::fakeKey(Keystroke(key + 1, down, repeat, 0));
+    }
+
+    void dispatchRelativeGroup(std::int32_t offset) {
+        OSXKeyState::fakeKey(Keystroke(offset, false, false));
     }
 
     void relay(const KeyRemapper::KeyEventList& events) {
@@ -119,6 +128,18 @@ protected:
     void waitForInputSourceSettling() override {
         trace.push_back("settle");
         ++settles;
+    }
+
+    OSXInputSourceBackend inputSourceBackend() const override { return backend; }
+    OSXInputSourceShortcutResult readInputSourceShortcut() const override {
+        ++shortcutReads;
+        trace.push_back("shortcut-read");
+        return shortcut;
+    }
+    bool postInputSourceShortcut(const std::vector<OSXInputSourceShortcutEvent>& events) override {
+        trace.push_back("shortcut-post");
+        attemptedShortcutPlans.push_back(events);
+        return shortcutPostingSucceeds;
     }
 };
 
@@ -342,6 +363,161 @@ TEST_F(OSXF19DispatchTests, remappedHoldAndCleanupDoNotBecomeAToggleOrLeakAModif
     EXPECT_EQ(kVK_ANSI_A, keys.deliveries[0].key);
     EXPECT_EQ(0u, keys.deliveries[0].flags);
     EXPECT_EQ(0u, keys.getModifierStateAsOSXFlags());
+}
+
+TEST_F(OSXF19DispatchTests, nativeShortcutRequestsConfiguredChordBeforeTheNextKeyWithoutTIS)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    tap();
+    letter();
+    EXPECT_EQ((std::vector<std::string>{"shortcut-read", "shortcut-post", "settle", "key-down", "key-up"}), keys.trace);
+    EXPECT_TRUE(keys.offsets.empty());
+    ASSERT_EQ(1u, keys.attemptedShortcutPlans.size());
+    const auto& plan = keys.attemptedShortcutPlans[0];
+    ASSERT_EQ(4u, plan.size());
+    EXPECT_EQ(kVK_Control, plan[0].keyCode);
+    EXPECT_TRUE(plan[0].down);
+    EXPECT_EQ(kCGEventFlagMaskControl, plan[0].flags);
+    EXPECT_EQ(kVK_Space, plan[1].keyCode);
+    EXPECT_TRUE(plan[1].down);
+    EXPECT_FALSE(plan[2].down);
+    EXPECT_EQ(kVK_Control, plan[3].keyCode);
+    EXPECT_FALSE(plan[3].down);
+    EXPECT_EQ(0u, plan[3].flags);
+    EXPECT_EQ(0u, keys.getModifierStateAsOSXFlags());
+    ASSERT_EQ(2u, keys.deliveries.size());
+    EXPECT_EQ(kVK_ANSI_A, keys.deliveries[0].key);
+    // A posting request is not an IME/source acknowledgement.
+    EXPECT_EQ(kOSXAppleRomanABC, keys.deliveries[0].source);
+    EXPECT_EQ(0u, keys.deliveries[0].flags);
+}
+
+TEST_F(OSXF19DispatchTests, nativeShortcutRepeatAndReleaseAreConsumedWithoutAnotherRequest)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.dispatch(kVK_F19, false);
+    keys.dispatch(kVK_F19, true, true);
+    EXPECT_EQ(0, keys.shortcutReads);
+    keys.fakeKeyDown(kKeyF19, 0, 100);
+    keys.fakeKeyDown(kKeyF19, 0, 100);
+    EXPECT_TRUE(keys.fakeKeyRepeat(kKeyF19, 0, 3, 100));
+    EXPECT_TRUE(keys.fakeKeyUp(100));
+    EXPECT_EQ(1, keys.shortcutReads);
+    EXPECT_EQ(1u, keys.attemptedShortcutPlans.size());
+    EXPECT_EQ(1, keys.settles);
+    EXPECT_TRUE(keys.offsets.empty());
+    EXPECT_TRUE(keys.deliveries.empty());
+    EXPECT_EQ(0, keys.getKeyState(kVK_F19 + 1));
+}
+
+TEST_F(OSXF19DispatchTests, nativeShortcutLookupOrPostingFailureNeverFallsBackToTIS)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.shortcut.valid = false;
+    tap();
+    EXPECT_EQ((std::vector<std::string>{"shortcut-read"}), keys.trace);
+    EXPECT_TRUE(keys.attemptedShortcutPlans.empty());
+    EXPECT_EQ(0, keys.settles);
+    keys.trace.clear();
+    keys.shortcut.valid = true;
+    keys.shortcut.shortcut = {kVK_ANSI_A, kCGEventFlagMaskCommand};
+    tap();
+    EXPECT_EQ((std::vector<std::string>{"shortcut-read"}), keys.trace);
+    EXPECT_TRUE(keys.attemptedShortcutPlans.empty());
+    EXPECT_TRUE(keys.offsets.empty());
+    keys.trace.clear();
+    keys.shortcut.shortcut = {kVK_Space, kCGEventFlagMaskControl};
+    keys.shortcutPostingSucceeds = false;
+    tap();
+    letter();
+    EXPECT_EQ((std::vector<std::string>{"shortcut-read", "shortcut-post", "key-down", "key-up"}), keys.trace);
+    EXPECT_TRUE(keys.offsets.empty());
+    EXPECT_EQ(0, keys.settles);
+    ASSERT_EQ(2u, keys.deliveries.size());
+    EXPECT_EQ(0u, keys.deliveries[0].flags);
+}
+
+TEST_F(OSXF19DispatchTests, nativeShortcutRejectsHeldModifiersWithoutChangingThem)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.dispatch(kVK_RightOption, true);
+    tap();
+    letter();
+    EXPECT_EQ(0, keys.shortcutReads);
+    EXPECT_TRUE(keys.attemptedShortcutPlans.empty());
+    EXPECT_TRUE(keys.offsets.empty());
+    ASSERT_EQ(3u, keys.deliveries.size());
+    EXPECT_EQ(kCGEventFlagMaskAlternate, keys.deliveries[1].flags);
+    EXPECT_EQ(kCGEventFlagMaskAlternate, keys.getModifierStateAsOSXFlags());
+    keys.dispatch(kVK_RightOption, false);
+    EXPECT_EQ(0u, keys.getModifierStateAsOSXFlags());
+}
+
+TEST_F(OSXF19DispatchTests, configuredNativeF19IsAPlanNotARecursiveSemanticToggle)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.shortcut.shortcut = {kVK_F19, 0};
+    tap();
+    ASSERT_EQ(1u, keys.attemptedShortcutPlans.size());
+    const auto& plan = keys.attemptedShortcutPlans[0];
+    ASSERT_EQ(2u, plan.size());
+    EXPECT_EQ(kVK_F19, plan[0].keyCode);
+    EXPECT_TRUE(plan[0].down);
+    EXPECT_FALSE(plan[1].down);
+    EXPECT_EQ(1, keys.shortcutReads);
+    EXPECT_TRUE(keys.offsets.empty());
+    EXPECT_TRUE(keys.deliveries.empty());
+}
+
+TEST_F(OSXF19DispatchTests, invalidBackendDoesNotReadSourcesSendShortcutOrFallback)
+{
+    keys.backend = OSXInputSourceBackend::Invalid;
+    tap();
+    letter();
+    EXPECT_EQ((std::vector<std::string>{"key-down", "key-up"}), keys.trace);
+    EXPECT_EQ(0, keys.shortcutReads);
+    EXPECT_TRUE(keys.offsets.empty());
+    EXPECT_TRUE(keys.attemptedShortcutPlans.empty());
+    EXPECT_EQ(0, keys.settles);
+}
+
+TEST_F(OSXF19DispatchTests, nativeBackendDoesNotRerouteSeparateRelativeGroupRequests)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.dispatchRelativeGroup(1);
+    EXPECT_EQ((std::vector<std::int32_t>{1}), keys.offsets);
+    EXPECT_EQ((std::vector<std::string>{"select"}), keys.trace);
+    EXPECT_EQ(0, keys.shortcutReads);
+    EXPECT_TRUE(keys.attemptedShortcutPlans.empty());
+    EXPECT_EQ(0, keys.settles);
+}
+
+TEST_F(OSXF19DispatchTests, nativeRemapperPipelineDoesNotChangeTheFixtureSourceOrLeakModifiers)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    KeyRemapper remapper;
+    KeyRemapConfig config;
+    config.addTapRule("mac", kKeyAlt_R, kKeyF19, kKeySuper_R);
+    config.addTapRule("mac", kKeyHangul, kKeyF19, kKeySuper_R);
+    remapper.setConfig(config);
+    for (KeyID sourceKey : {kKeyAlt_R, kKeyHangul}) {
+        const auto mask = sourceKey == kKeyAlt_R ? KeyModifierAlt : 0;
+        for (int i = 0; i < 32; ++i) {
+            keys.deliveries.clear();
+            keys.relay(remapper.remapKeyDown("mac", sourceKey, mask, 100));
+            keys.relay(remapper.remapKeyUp("mac", sourceKey, 0, 100));
+            keys.relay(remapper.remapKeyDown("mac", 'a', 0, 101));
+            keys.relay(remapper.remapKeyUp("mac", 'a', 0, 101));
+            ASSERT_EQ(2u, keys.deliveries.size());
+            EXPECT_EQ(kOSXAppleRomanABC, keys.deliveries[0].source);
+            EXPECT_EQ(0u, keys.deliveries[0].flags);
+            EXPECT_EQ(0u, keys.getActiveModifiers());
+            EXPECT_EQ(0u, keys.getModifierStateAsOSXFlags());
+        }
+    }
+    EXPECT_EQ(64, keys.shortcutReads);
+    EXPECT_EQ(64u, keys.attemptedShortcutPlans.size());
+    EXPECT_TRUE(keys.offsets.empty());
 }
 
 } // namespace

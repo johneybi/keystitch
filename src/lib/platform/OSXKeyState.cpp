@@ -28,6 +28,7 @@
 #include <CoreServices/CoreServices.h>
 #include <dispatch/dispatch.h>
 #include <IOKit/hidsystem/IOHIDLib.h>
+#include <cstdlib>
 
 namespace inputleap {
 
@@ -242,6 +243,8 @@ OSXKeyState::init()
 {
     m_deadKeyState = 0;
     m_pressedModifiers.clear();
+    const char* backend = std::getenv("INPUTLEAP_MACOS_IME_BACKEND");
+    m_inputSourceBackend = ParseOSXInputSourceBackend(backend == nullptr ? "" : backend);
 
     // build virtual key map
     for (size_t i = 0; i < sizeof(s_controlKeys) / sizeof(s_controlKeys[0]);
@@ -715,6 +718,100 @@ void OSXKeyState::waitForInputSourceSettling()
     this_thread_sleep(0.075);
 }
 
+OSXInputSourceBackend OSXKeyState::inputSourceBackend() const
+{
+    return m_inputSourceBackend;
+}
+
+OSXInputSourceShortcutResult OSXKeyState::readInputSourceShortcut() const
+{
+    CFPropertyListRef pref = runOnMainThread([]() {
+        return CFPreferencesCopyValue(CFSTR("AppleSymbolicHotKeys"),
+            CFSTR("com.apple.symbolichotkeys"), kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    });
+    auto result = ParseOSXInputSourceShortcut(pref);
+    if (pref != nullptr) CFRelease(pref);
+    if (!result.valid) return result;
+
+    CFArrayRef hotKeys = nullptr;
+    const OSStatus status = runOnMainThread([&]() { return CopySymbolicHotKeys(&hotKeys); });
+    const bool registered = status == noErr
+        && OSXInputSourceShortcutIsRegistered(result.shortcut, hotKeys);
+    if (hotKeys != nullptr) CFRelease(hotKeys);
+    result.valid = registered;
+    // The public list has no action IDs: this confirms the chord is enabled,
+    // not that the OS will execute action 60 or finish foreground composition.
+    result.reason = registered ? "configured-chord-listed-by-system" : "shortcut-registration-unconfirmed";
+    return result;
+}
+
+bool OSXKeyState::postInputSourceShortcut(const std::vector<OSXInputSourceShortcutEvent>& events)
+{
+    if (events.empty() || events.size() > 10) return false;
+    std::vector<CGEventRef> prepared;
+    prepared.reserve(events.size());
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStatePrivate);
+    if (source == nullptr) return false;
+    for (const auto& event : events) {
+        CGEventRef key = CGEventCreateKeyboardEvent(source, event.keyCode, event.down);
+        if (key == nullptr) {
+            for (auto previous : prepared) CFRelease(previous);
+            CFRelease(source);
+            return false; // No partial chord has been posted.
+        }
+        CGEventSetFlags(key, event.flags);
+        CGEventSetIntegerValueField(key, kCGKeyboardEventAutorepeat, 0);
+        prepared.push_back(key);
+    }
+    for (auto key : prepared) CGEventPost(kCGHIDEventTap, key);
+    for (auto key : prepared) CFRelease(key);
+    CFRelease(source);
+    // CGEventPost has no acceptance/composition acknowledgement.
+    return true;
+}
+
+void OSXKeyState::switchInputSourceFromF19()
+{
+    const auto backend = inputSourceBackend();
+    if (backend == OSXInputSourceBackend::NativeShortcut) {
+        LOG_INFO("F19 transition backend=native-shortcut requested (IME readiness unverified)");
+        if (!m_pressedModifiers.empty()) {
+            LOG_WARN("F19 native shortcut rejected: synthetic modifiers held; no fallback");
+            return;
+        }
+        const auto result = readInputSourceShortcut();
+        if (!result.valid) {
+            LOG_WARN("F19 native shortcut unavailable reason=%s; no fallback", result.reason.c_str());
+            return;
+        }
+        const auto events = MakeOSXInputSourceShortcutEvents(result.shortcut, getModifierStateAsOSXFlags());
+        if (events.empty() || !postInputSourceShortcut(events)) {
+            LOG_WARN("F19 native shortcut dispatch failed; no fallback");
+            return;
+        }
+        LOG_INFO("F19 native shortcut posted key=%u flags=0x%llx (activation and IME state unverified)",
+                 static_cast<unsigned int>(result.shortcut.keyCode),
+                 static_cast<unsigned long long>(result.shortcut.modifiers));
+        waitForInputSourceSettling();
+        return;
+    }
+    if (backend != OSXInputSourceBackend::DirectTIS) {
+        LOG_WARN("F19 transition rejected: invalid backend; no events or fallback");
+        return;
+    }
+    LOG_INFO("F19 transition begin backend=direct-tis modifiers=0x%08x pressedModifiers=%zu state=%s",
+             static_cast<unsigned int>(getModifierStateAsOSXFlags()),
+             m_pressedModifiers.size(), describeInputSourceState().c_str());
+    if (cycleInputSource(1)) {
+        LOG_INFO("F19 transition backend=direct-tis selected bidirectional source state=%s (foreground IME state unverified)",
+                 describeInputSourceState().c_str());
+        waitForInputSourceSettling();
+    }
+    else {
+        LOG_WARN("F19 transition backend=direct-tis failed state=%s", describeInputSourceState().c_str());
+    }
+}
+
 void OSXKeyState::postUnicodeString(const std::u16string& str)
 {
     for (char16_t ch : str) {
@@ -749,25 +846,11 @@ OSXKeyState::fakeKey(const Keystroke& keystroke)
             "  button=0x%04x virtualKey=0x%04x keyDown=%s",
             button, virtualKey, keyDown ? "down" : "up");
 
-        // F19 is the semantic target for the Windows Right Alt tap. Select
-        // the opposite language family through the generic policy below:
-        // Hangul -> Roman and Roman -> Hangul. Do not hard-code a Gureum mode
-        // here; Apple Korean/ABC are the supported baseline and Gureum is an
-        // optional compatible target.
+        // F19 remains semantic: the selected backend owns switching. Never
+        // chain native shortcut and TIS selection or forward the remote F19.
         if (virtualKey == kVK_F19) {
             if (keyDown && !repeat) {
-                LOG_INFO("F19 transition begin modifiers=0x%08x pressedModifiers=%zu state=%s",
-                         static_cast<unsigned int>(getModifierStateAsOSXFlags()),
-                         m_pressedModifiers.size(),
-                         describeInputSourceState().c_str());
-                if (cycleInputSource(1)) {
-                    LOG_INFO("F19 transition selected bidirectional source state=%s (foreground IME state unverified)",
-                             describeInputSourceState().c_str());
-                    waitForInputSourceSettling();
-                }
-                else {
-                    LOG_WARN("F19 transition failed state=%s", describeInputSourceState().c_str());
-                }
+                switchInputSourceFromF19();
             }
             break;
         }

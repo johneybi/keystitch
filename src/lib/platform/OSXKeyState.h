@@ -19,6 +19,7 @@
 #pragma once
 
 #include "inputleap/KeyState.h"
+#include "platform/OSXInputSourceShortcut.h"
 
 #include <Carbon/Carbon.h>
 
@@ -117,6 +118,9 @@ protected:
     virtual bool cycleInputSource(std::int32_t offset);
     virtual std::string describeInputSourceState() const;
     virtual void waitForInputSourceSettling();
+    virtual OSXInputSourceBackend inputSourceBackend() const;
+    virtual OSXInputSourceShortcutResult readInputSourceShortcut() const;
+    virtual bool postInputSourceShortcut(const std::vector<OSXInputSourceShortcutEvent>& events);
 
 private:
     class KeyResource;
@@ -179,6 +183,8 @@ private:
     GroupMap m_groupMap;
     // Physical sides must remain distinct when both sides of a modifier are held.
     std::set<std::uint8_t> m_pressedModifiers;
+    OSXInputSourceBackend m_inputSourceBackend;
+    void switchInputSourceFromF19();
     void postUnicodeString(const std::u16string& str);
     void postBackspace(int count);
 };
