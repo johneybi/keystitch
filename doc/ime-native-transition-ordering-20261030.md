@@ -125,7 +125,38 @@ setting was changed. The backend choice is still per launch; an ordinary GUI
 relaunch without the environment returns to the compiled direct-TIS default.
 
 A separate Chrome tab is open at `http://127.0.0.1:18191/transition.html`.
-The user has been asked to perform fast Windows and built-in keyboard tests in
-the same field and record each separately. **No real input result for this
-increment is recorded yet.** Installation, source observations and unit tests
-alone do not establish that the observed browser first-character issue is fixed.
+The user was asked to perform fast Windows and built-in keyboard tests in
+the same field and record each separately. Installation, source observations
+and unit tests alone do not establish browser first-character correctness.
+
+## Initial user observation and runtime evidence
+
+The user subsequently reported that typing became markedly more comfortable
+and was working well at present, while explicitly reserving judgement until
+longer use. This is initial positive real-use feedback for the corrected client,
+not proof of long-running reliability or universal application compatibility.
+
+The active client session started at 16:01:49 KST. At inspection it had:
+
+- 16 native shortcut posts and 16 `source-stable` barrier releases;
+- barrier duration from post to release: min 40.034 ms, median 57.089 ms,
+  max 62.407 ms;
+- no unconfirmed timeout/queue-limit/pointer releases;
+- no native request rejection, logged connection error or disconnect.
+
+Those durations include source observation and the experimental stability
+window. They are not keyboard-to-browser text latency, and do not quantify the
+difference from the built-in keyboard. The user's report supplies the separate
+evidence that the new behavior feels better.
+
+The dedicated new tab initially existed without being the selected native
+Chrome tab. When the user asked where it was, the visible old A/B tab contained
+additional typing; the agent explicitly raised Chrome and selected the new
+tab. The new page was still empty at the later inspection. Therefore this is
+unscripted real use with runtime evidence, not a completed three-trial-per-
+keyboard comparison recorded by the new page. No built-in keyboard latency,
+Safari/ChatGPT-specific result or long-run pass is inferred.
+
+The installed client and existing Mac settings were left in place for longer
+use. Source revision remains `24419830`; this follow-up records observations
+only. The per-launch backend-selection limitation above remains in effect.
