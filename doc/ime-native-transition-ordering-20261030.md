@@ -67,7 +67,7 @@ source ID never proves that the foreground app committed its old composition.
 Content-free native logs correlate a switch sequence, preference/read/post
 duration, posted monotonic/epoch timestamps, first observed changed source,
 barrier release reason/queue size, and the first following nonmodifier down.
-No typed characters or keycodes are added to these transition diagnostics.
+No typed text or following-character keycodes are added to these diagnostics.
 They establish request/selection/posting order, not browser text acceptance.
 
 A disposable page at `/transition.html` on the existing loopback-only lab
@@ -102,3 +102,30 @@ must be recorded after installation. The earlier B failures are not replaced
 by these offline results. Compare the same disposable field, both directions,
 without committing Hangul before switching, at normal and rapid typing speeds.
 If the built-in baseline fails, stop; do not recover by changing Mac shortcuts.
+
+## Installed candidate
+
+At 16:01 KST, client revision `24419830a77212723b2b78c0de90d56b679b91a9`
+was installed in `/Applications/Input Leap Keymap.app` and launched explicitly
+with `INPUTLEAP_MACOS_IME_BACKEND=native-shortcut`. One GUI/child client and a
+successful connection to the existing Windows server were confirmed. The
+bundle passed strict/deep codesign verification. Post-signing client SHA256:
+`b9ef25734b37c3ddf23af03b76c749a600576357aa260d9e71f53c96305cb8e3`.
+
+The previous `aea64cd3` app and current preference exports were preserved at
+`~/Library/Application Support/InputLeapKeymap/Backups/20261030-ime-transition-24419830/`.
+Its client SHA256 remains
+`adecd98842314438d754ef57368f2cb7aaff7a6e534aabc5060b33d80640c8eb`.
+`original.app` is the verified copy; `original-at-swap.app` is the original
+installation moved out during replacement. No old bundle was deleted.
+
+The complete symbolic-hotkey dictionary and enabled input-source list match
+the pre-installation exports. No Mac shortcut, Gureum preference or Windows
+setting was changed. The backend choice is still per launch; an ordinary GUI
+relaunch without the environment returns to the compiled direct-TIS default.
+
+A separate Chrome tab is open at `http://127.0.0.1:18191/transition.html`.
+The user has been asked to perform fast Windows and built-in keyboard tests in
+the same field and record each separately. **No real input result for this
+increment is recorded yet.** Installation, source observations and unit tests
+alone do not establish that the observed browser first-character issue is fixed.
