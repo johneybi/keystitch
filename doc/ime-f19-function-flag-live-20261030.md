@@ -110,3 +110,96 @@ If baseline fails, source/menu diverges or a chord is unavailable, stop and
 record the evidence. Never claim a fix based on menu state or a posted-event
 log alone. A/B results remain pending until the user performs the real remote
 keyboard steps; this document does not pre-record them as successful.
+
+## Correction applied, comparison A ready
+
+Client source revision `aea64cd3b9a550ff0b3176a94b02ea97c0b1ef23` was applied
+at 13:35 KST. The installed client contains that revision and its post-signing
+SHA256 is `adecd98842314438d754ef57368f2cb7aaff7a6e534aabc5060b33d80640c8eb`.
+The bundle passed strict/deep codesign verification. One GUI and one child
+client reconnected to the existing Windows server; the child's environment
+was confirmed as `INPUTLEAP_MACOS_IME_BACKEND=direct-tis`.
+
+The complete symbolic-hotkey dictionary and enabled input-source list match
+the pre-installation exports. The settings screen was closed without changing
+the shortcut. The original and first-candidate bundles remain in the recovery
+directory above. No Windows settings or executable was changed.
+
+The Chrome comparison tab is open at `http://127.0.0.1:18191/`, served only on
+loopback from an isolated `web` directory. It is marked for handoff so the same
+input field survives the next turn. A successful connection is not counted as
+a successful IME comparison.
+
+## A/B observations
+
+The first observed A output was `rkskabc`, rather than `가나abc`. At 13:37:13,
+the direct-TIS log reported ABC to Gureum.han2 selection, and at 13:37:15 it
+reported Gureum.han2 to ABC. The actual field's Latin-only output conflicts
+with treating those source-selection messages as successful Hangul input.
+
+The user subsequently saved this A field result on the page:
+
+`rkskabc가abc나가abc나가abc나가abc가abc나가abc`
+
+At that snapshot, the page reported 65 input events and no active composition.
+The exact number/order of attempted keyboard sequences was not independently
+observed, so this is not a numeric per-trial success rate. The user confirmed
+initial failure, recovery after returning to the field, and missing or delayed
+`나` following the mid-composition toggle. Neither focus recovery nor partial
+syllable output counts as an end-to-end pass.
+
+At 13:39:33, after A was recorded and composition had ended, the same installed
+app was restarted with `native-shortcut`. One GUI/client, connection, and the
+child's explicit native-backend environment were confirmed. The existing
+Chrome tab, exact editable element and saved A result were preserved; only its
+manual phase label changed to B. The user was asked to clear the editable test
+text, start from ABC and repeat the same physical Windows-keyboard sequence,
+then check their usual built-in Mac keyboard toggle in that field.
+
+Between 13:42:04 and 13:42:28, the native logs show actual F19 posting requests
+with key=80 and flags=0x800000, without a registration rejection or TIS fallback.
+The saved B field result was:
+
+`가나abc가나abcrr가나abc가나abcrㅏ남bcrㅏ남bcrㅏ나abc가나abc가남bc가남bc`
+
+The page reported 177 input events and no active composition at that snapshot.
+The user confirmed that B switches, but switches late enough that fast typing
+puts one character in the previous language. Early `가나abc` output is evidence
+of working individual attempts, not a stable pass across the whole run.
+Uncontrolled typos/speed mean individual substrings cannot all be attributed
+to the implementation, nor converted into a per-trial failure percentage.
+
+After B was saved, the expanded recent-event panel showed the final sequence:
+KeyR/KeyK/KeyS/KeyK generated composition input; KeyA arrived with composing=true
+and generated additional composition updates; composition ended before KeyB
+and KeyC generated ordinary insertText events. The recorded compositionend
+events had isTrusted=false; the page itself dispatches no events. That flag
+alone does not identify who produced them or establish an input-method defect.
+The panel was expanded only after the saved result, producing a later blur.
+
+This supports investigating the boundary between the switch request and the
+first Roman key, rather than treating a posted hotkey as completion. The log
+does not record precise per-key/source/composition timestamps, so it cannot
+separate OS hotkey processing delay from source notification delay or
+foreground IME commit delay. A longer constant sleep is not a verified fix.
+
+Built-in Mac keyboard behavior was requested but not separately confirmed in
+the response. Actual ChatGPT/Safari fields, Apple Korean/ABC and long-running
+reliability were not tested. Restart/refocus between A/B and unmeasured typing
+speed are experimental limitations. Both backends still have observed failures.
+
+## Runtime left for follow-up
+
+The corrected client remains installed and the current process is running B,
+`native-shortcut`. This selection is **per launch**: quitting and opening the
+GUI normally, or starting it at login without that environment variable,
+returns to the compiled `direct-tis` default. No global environment or permanent
+backend preference was added. The macOS F19/Globe shortcuts remain unchanged.
+
+Next work should add correlated monotonic timestamps for request, observed
+source change and first following key, using disposable test fields. Source
+notification alone is not an IME-composition acknowledgement. Any candidate
+that buffers the first key must define a bounded timeout, preserve key-down/up
+order and modifiers, handle disconnect/quit cleanup, and expose failure rather
+than silently selecting another backend or dropping a character. No such
+buffering/acknowledgement mechanism was implemented in this comparison.
