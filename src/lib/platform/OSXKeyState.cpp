@@ -704,6 +704,17 @@ void OSXKeyState::postBackspace(int count)
     }
 }
 
+std::string OSXKeyState::describeInputSourceState() const
+{
+    return getCurrentInputSourceState();
+}
+
+void OSXKeyState::waitForInputSourceSettling()
+{
+    // Preserve the historical interval. This is not an IME acknowledgement.
+    this_thread_sleep(0.075);
+}
+
 void OSXKeyState::postUnicodeString(const std::u16string& str)
 {
     for (char16_t ch : str) {
@@ -748,15 +759,14 @@ OSXKeyState::fakeKey(const Keystroke& keystroke)
                 LOG_INFO("F19 transition begin modifiers=0x%08x pressedModifiers=%zu state=%s",
                          static_cast<unsigned int>(getModifierStateAsOSXFlags()),
                          m_pressedModifiers.size(),
-                         getCurrentInputSourceState().c_str());
+                         describeInputSourceState().c_str());
                 if (cycleInputSource(1)) {
                     LOG_INFO("F19 transition selected bidirectional source state=%s (foreground IME state unverified)",
-                             getCurrentInputSourceState().c_str());
-                    // Historical settling interval, not an IME acknowledgement.
-                    this_thread_sleep(0.075);
+                             describeInputSourceState().c_str());
+                    waitForInputSourceSettling();
                 }
                 else {
-                    LOG_WARN("F19 transition failed state=%s", getCurrentInputSourceState().c_str());
+                    LOG_WARN("F19 transition failed state=%s", describeInputSourceState().c_str());
                 }
             }
             break;

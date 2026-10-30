@@ -111,6 +111,13 @@ protected:
     virtual void postKeyboardEvent(std::uint8_t virtualKeyCode, bool postDown,
                                    CGEventFlags flags);
 
+    // OS-side boundaries for the real F19 dispatcher. Offline tests replace
+    // all three plus postKeyboardEvent; they neither read nor change TIS state.
+    // The production adapter still owns source selection/activation polling.
+    virtual bool cycleInputSource(std::int32_t offset);
+    virtual std::string describeInputSourceState() const;
+    virtual void waitForInputSourceSettling();
+
 private:
     class KeyResource;
     typedef std::vector<KeyLayout> GroupList;
@@ -126,9 +133,6 @@ private:
 
     // Change active keyboard group to group
     void setGroup(std::int32_t group);
-
-    // Cycle through enabled, selectable macOS input sources.
-    bool cycleInputSource(std::int32_t offset);
 
     // Check if the keyboard layout has changed and update keyboard state
     // if so.

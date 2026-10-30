@@ -44,3 +44,4 @@ compile_commands.json
 # Local historical-source verification artifacts
 /build-recovery/
 /build-stability/
+/build-f19/

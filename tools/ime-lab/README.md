@@ -122,6 +122,10 @@ source fix and expanded Input Leap pipeline tests, still without installation.
 
 ## Next decision
 
+The [offline F19 dispatcher increment](../../doc/ime-f19-dispatch-offline-20261030.md)
+extends the real remapper/key-state path through the macOS F19 handler with
+inert OS boundaries. Its tests do not launch this lab or validate real IME text.
+
 If the defect reproduces in Gureum's real input-controller tests, evaluate the
 candidate there first. If remote toggling fails with native and web controls
 even after that fix, trace Input Leap's group overrides and event ordering.
