@@ -1,5 +1,9 @@
 # Explicit F19 switching backends — 2026-10-30
 
+This records the original `c61708c5` increment. The subsequent
+[F19 function-flag correction and live comparison preparation](ime-f19-function-flag-live-20261030.md)
+supports the user's existing stored F19 chord without changing macOS shortcuts.
+
 ## Scope
 
 This source-only increment follows `26025a20`. It adds an **experimental,

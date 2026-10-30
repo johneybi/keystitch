@@ -410,6 +410,36 @@ TEST_F(OSXF19DispatchTests, nativeShortcutRepeatAndReleaseAreConsumedWithoutAnot
     EXPECT_EQ(0, keys.getKeyState(kVK_F19 + 1));
 }
 
+TEST_F(OSXF19DispatchTests, nativeConfiguredF19PreservesFunctionFlagWithoutRecursionOrModifierLeak)
+{
+    keys.backend = OSXInputSourceBackend::NativeShortcut;
+    keys.shortcut.shortcut = {kVK_F19, kCGEventFlagMaskSecondaryFn};
+    keys.fakeKeyDown(kKeyF19, 0, 100);
+    keys.fakeKeyDown(kKeyF19, 0, 100);
+    EXPECT_TRUE(keys.fakeKeyUp(100));
+    letter();
+    EXPECT_EQ(1, keys.shortcutReads);
+    ASSERT_EQ(1u, keys.attemptedShortcutPlans.size());
+    const auto& plan = keys.attemptedShortcutPlans[0];
+    ASSERT_EQ(2u, plan.size());
+    for (const auto& event : plan) {
+        EXPECT_EQ(kVK_F19, event.keyCode);
+        EXPECT_EQ(kCGEventFlagMaskSecondaryFn, event.flags);
+    }
+    EXPECT_TRUE(plan[0].down);
+    EXPECT_FALSE(plan[1].down);
+    EXPECT_TRUE(keys.offsets.empty());
+    EXPECT_EQ(1, keys.settles);
+    ASSERT_EQ(2u, keys.deliveries.size());
+    for (const auto& event : keys.deliveries) {
+        EXPECT_EQ(kVK_ANSI_A, event.key);
+        EXPECT_EQ(0u, event.flags);
+        EXPECT_EQ(kOSXAppleRomanABC, event.source);
+    }
+    EXPECT_EQ(0u, keys.getModifierStateAsOSXFlags());
+    EXPECT_EQ(0, keys.getKeyState(kVK_F19 + 1));
+}
+
 TEST_F(OSXF19DispatchTests, nativeShortcutLookupOrPostingFailureNeverFallsBackToTIS)
 {
     keys.backend = OSXInputSourceBackend::NativeShortcut;

@@ -137,6 +137,59 @@ TEST(OSXInputSourceShortcutTests, registeredHotkeysUseCarbonModifiersNotQuartzFl
     }
 }
 
+TEST(OSXInputSourceShortcutTests, configuredF19KeepsStoredFunctionFlagAndChecksCarbonRegistration)
+{
+    // Observed read-only on the host: System Settings displays F19, while
+    // action 60 stores [65535, 80, 8388608] and the public list uses 0x20000.
+    FixturePlist pref("<dict><key>60</key><dict><key>enabled</key><true/>"
+        "<key>value</key><dict><key>type</key><string>standard</string>"
+        "<key>parameters</key><array><integer>65535</integer><integer>80</integer>"
+        "<integer>8388608</integer></array></dict></dict></dict>");
+    const auto result = ParseOSXInputSourceShortcut(pref.value);
+    ASSERT_TRUE(result.valid);
+    EXPECT_EQ(kVK_F19, result.shortcut.keyCode);
+    EXPECT_EQ(kCGEventFlagMaskSecondaryFn, result.shortcut.modifiers);
+    FixturePlist registered(registration("<integer>80</integer>", "<integer>131072</integer>"));
+    EXPECT_TRUE(OSXInputSourceShortcutIsRegistered(result.shortcut, static_cast<CFArrayRef>(registered.value)));
+    FixturePlist missingFlag(registration("<integer>80</integer>", "<integer>0</integer>"));
+    EXPECT_FALSE(OSXInputSourceShortcutIsRegistered(result.shortcut, static_cast<CFArrayRef>(missingFlag.value)));
+    FixturePlist quartzFlags(registration("<integer>80</integer>", "<integer>8388608</integer>"));
+    EXPECT_FALSE(OSXInputSourceShortcutIsRegistered(result.shortcut, static_cast<CFArrayRef>(quartzFlags.value)));
+}
+
+TEST(OSXInputSourceShortcutTests, functionFlagStaysOnFunctionKeyWithoutSynthesizingGlobeTaps)
+{
+    const std::uint64_t masks[] = {kCGEventFlagMaskControl, kCGEventFlagMaskAlternate,
+                                  kCGEventFlagMaskShift, kCGEventFlagMaskCommand};
+    for (unsigned bits = 0; bits < 16; ++bits) {
+        std::uint64_t flags = kCGEventFlagMaskSecondaryFn;
+        for (unsigned i = 0; i < 4; ++i) if (bits & (1u << i)) flags |= masks[i];
+        const auto plan = MakeOSXInputSourceShortcutEvents({kVK_F19, flags}, 0);
+        ASSERT_FALSE(plan.empty());
+        std::set<std::uint16_t> held;
+        unsigned functionEvents = 0;
+        for (const auto& event : plan) {
+            EXPECT_NE(kVK_Function, event.keyCode);
+            if (event.keyCode == kVK_F19) {
+                ++functionEvents;
+                EXPECT_EQ(flags, event.flags);
+            } else {
+                EXPECT_EQ(0u, event.flags & kCGEventFlagMaskSecondaryFn);
+            }
+            if (event.down) EXPECT_TRUE(held.insert(event.keyCode).second);
+            else EXPECT_EQ(1u, held.erase(event.keyCode));
+        }
+        EXPECT_EQ(2u, functionEvents);
+        EXPECT_TRUE(held.empty());
+        EXPECT_LE(plan.size(), 10u);
+    }
+    // No general Fn/Globe shortcut support: only the F1-F20 event flag.
+    EXPECT_TRUE(MakeOSXInputSourceShortcutEvents({kVK_Space,
+        kCGEventFlagMaskControl | kCGEventFlagMaskSecondaryFn}, 0).empty());
+    EXPECT_TRUE(MakeOSXInputSourceShortcutEvents({kVK_F19,
+        kCGEventFlagMaskSecondaryFn}, kCGEventFlagMaskSecondaryFn).empty());
+}
+
 TEST(OSXInputSourceShortcutTests, controlOptionSpaceHasBalancedKeysAndFlags)
 {
     const auto flags = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate;

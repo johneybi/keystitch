@@ -36,11 +36,13 @@ bool functionKey(std::uint16_t key)
 bool supported(const OSXInputSourceShortcut& shortcut)
 {
     const auto allowed = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate
-        | kCGEventFlagMaskShift | kCGEventFlagMaskCommand;
+        | kCGEventFlagMaskShift | kCGEventFlagMaskCommand
+        | (functionKey(shortcut.keyCode) ? kCGEventFlagMaskSecondaryFn : 0);
     if (shortcut.modifiers & ~static_cast<std::uint64_t>(allowed)) return false;
     if (functionKey(shortcut.keyCode)) return true;
     // Deliberately narrow experimental scope: reject text-generating keys,
-    // bare/Shift-Space, modifier/lock keys and Fn/Globe shortcuts.
+    // bare/Shift-Space, modifier/lock keys and general Fn/Globe shortcuts.
+    // F1-F20 may carry the function flag even when Settings shows only F19.
     return shortcut.keyCode == kVK_Space && (shortcut.modifiers
         & (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand));
 }
@@ -52,6 +54,7 @@ std::int64_t carbonFlags(std::uint64_t flags)
     if (flags & kCGEventFlagMaskAlternate) result |= optionKey;
     if (flags & kCGEventFlagMaskShift) result |= shiftKey;
     if (flags & kCGEventFlagMaskCommand) result |= cmdKey;
+    if (flags & kCGEventFlagMaskSecondaryFn) result |= kEventKeyModifierFnMask;
     return result;
 }
 
@@ -133,8 +136,11 @@ std::vector<OSXInputSourceShortcutEvent> MakeOSXInputSourceShortcutEvents(
         flags |= modifier.flag;
         events.push_back({modifier.key, true, flags});
     }
-    events.push_back({shortcut.keyCode, true, flags});
-    events.push_back({shortcut.keyCode, false, flags});
+    // Keep the stored function flag on the shortcut key pair. It is not a
+    // request to tap the physical Fn/Globe key, which has its own system action.
+    const auto keyFlags = flags | (shortcut.modifiers & kCGEventFlagMaskSecondaryFn);
+    events.push_back({shortcut.keyCode, true, keyFlags});
+    events.push_back({shortcut.keyCode, false, keyFlags});
     for (int i = 3; i >= 0; --i) {
         if (!(shortcut.modifiers & modifiers[i].flag)) continue;
         flags &= ~modifiers[i].flag;
