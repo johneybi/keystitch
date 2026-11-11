@@ -1,3 +1,14 @@
+# KeyStitch 제품화 작업
+
+이 브랜치는 Input Leap을 기반으로 Windows–Mac 입력 공유와 한영 전환을
+개선한 개발 계열입니다. 구현·실사용 결과·현재 설치본·남은 제약과 제품화 순서는
+[제품화 기준선](doc/product/README.md)에 정리합니다.
+
+아래는 계승한 Input Leap 안내입니다. KeyStitch의 지원 범위와 검증 상태는
+제품화 기준선을 우선 참고하세요.
+
+---
+
 # Input Leap
 
 <!-- add badges: flatpak, snap, GitHub Actions -->
