@@ -1,0 +1,2 @@
+# Development preview host only. The product engine remains C++.
+PySide6-Essentials==6.10.1

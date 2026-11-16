@@ -1,0 +1,102 @@
+{
+  "fileKey": "dKvWUPFPitrOBlto3ocAZt",
+  "url": "https://www.figma.com/design/dKvWUPFPitrOBlto3ocAZt",
+  "reviewedAt": "2026-11-17",
+  "pages": {
+    "screens": "0:1",
+    "components": "2:2",
+    "handoff": "2:3"
+  },
+  "screens": {
+    "workspace": {
+      "nodeId": "5:179",
+      "implementation": null
+    },
+    "keyboard": {
+      "nodeId": "5:2",
+      "implementation": "qml/Main.qml"
+    },
+    "menuBar": {
+      "nodeId": "5:332",
+      "implementation": null
+    }
+  },
+  "components": {
+    "Button/Primary": {
+      "nodeId": "3:2",
+      "implementation": "qml/KSButton.qml"
+    },
+    "Button/Secondary": {
+      "nodeId": "3:4",
+      "implementation": "qml/KSButton.qml"
+    },
+    "Button/Disabled": {
+      "nodeId": "3:6",
+      "implementation": "qml/KSButton.qml"
+    },
+    "Navigation/Default": {
+      "nodeId": "3:8",
+      "implementation": "qml/NavigationItem.qml"
+    },
+    "Navigation/Selected": {
+      "nodeId": "3:20",
+      "implementation": "qml/NavigationItem.qml"
+    },
+    "Status/Connected": {
+      "nodeId": "3:32",
+      "implementation": "qml/Main.qml",
+      "note": "Inline preview status; reconnecting state not implemented"
+    },
+    "Status/Paused": {
+      "nodeId": "3:35",
+      "implementation": "qml/Main.qml",
+      "note": "Inline preview status; reconnecting state not implemented"
+    },
+    "Status/Reconnecting": {
+      "nodeId": "3:38",
+      "implementation": null,
+      "note": "Figma only; reconnecting state not implemented"
+    },
+    "SettingRow": {
+      "nodeId": "3:41",
+      "implementation": "qml/SettingRow.qml"
+    },
+    "Keycap": {
+      "nodeId": "3:45",
+      "implementation": "qml/Main.qml",
+      "note": "Inline Rectangle and text in Main.qml"
+    },
+    "DeviceItem": {
+      "nodeId": "3:47",
+      "implementation": null,
+      "note": "Figma only"
+    },
+    "Toggle/On": {
+      "nodeId": "3:55",
+      "implementation": "qml/Main.qml",
+      "note": "Qt Quick Switch in Main.qml; not a custom toggle component"
+    },
+    "Toggle/Off": {
+      "nodeId": "3:57",
+      "implementation": "qml/Main.qml",
+      "note": "Qt Quick Switch in Main.qml; not a custom toggle component"
+    }
+  },
+  "icons": {
+    "search": "4:2",
+    "chevron-down": "4:6",
+    "keyboard": "4:9",
+    "chevron-right": "4:20",
+    "clipboard": "4:23",
+    "settings": "4:27",
+    "wrench": "4:31",
+    "laptop": "4:34",
+    "pause": "4:37",
+    "mouse": "4:41",
+    "monitor": "4:45"
+  },
+  "tokenSnapshot": "tokens.json",
+  "generatedTheme": "qml/Theme.qml",
+  "liveSync": false,
+  "codeConnect": false
+}
