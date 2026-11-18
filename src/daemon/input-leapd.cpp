@@ -17,6 +17,7 @@
  */
 
 #include "inputleap/win32/DaemonApp.h"
+#include "common/BuildInfo.h"
 
 #include <iostream>
 
@@ -25,6 +26,7 @@
 int
 main(int argc, char** argv)
 {
+    if (auto result = inputleap::handleBuildInfoRequest(argc, argv, inputleap::BuildComponent::Daemon)) return *result;
     inputleap::DaemonApp app;
     return app.run(argc, argv);
 }
@@ -36,6 +38,7 @@ main(int argc, char** argv)
 int WINAPI
 WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
+    if (auto result = inputleap::handleBuildInfoRequest(__argc, __argv, inputleap::BuildComponent::Daemon)) return *result;
     inputleap::DaemonApp app;
     return app.run(__argc, __argv);
 }

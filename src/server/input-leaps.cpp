@@ -20,6 +20,7 @@
 #include "arch/Arch.h"
 #include "base/Log.h"
 #include "base/EventQueue.h"
+#include "common/BuildInfo.h"
 
 #if WINAPI_MSWINDOWS
 #include "MSWindowsServerTaskBarReceiver.h"
@@ -33,6 +34,7 @@ CreateTaskBarReceiverFunc createTaskBarReceiver = nullptr;
 
 int server_main(int argc, char** argv)
 {
+    if (auto result = handleBuildInfoRequest(argc, argv, BuildComponent::Server)) return *result;
 #if SYSAPI_WIN32
     // record window instance for tray icon, etc
     ArchMiscWindows::setInstanceWin32(GetModuleHandle(nullptr));

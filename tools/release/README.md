@@ -29,7 +29,32 @@ python3 tools/release/audit_macos_bundle.py '/path/to/staged.app' \
 패키징 스크립트를 실행한 체크아웃의 revision은 GUI plist에
 `KeyStitchPackagingCheckoutRevision`으로 기록한다. 이것은 **바이너리를 빌드한
 revision의 증거가 아니다.** 이전 `KeyStitchSourceRevision` 표기를 사용하지 않는다.
-서로 다른 빌드의 실행 파일 혼합을 검출할 build provenance는 후속 작업이다.
+바이너리 자체의 build identity는 아래 별도 검사로 대조한다.
+
+## 실행 파일 묶음의 빌드 정보
+
+GUI·client·server·Windows daemon은 `--build-info`를 단독 인자로 받으면
+UI/설정/서비스/입력 엔진을 초기화하기 전에 JSON을 출력하고 종료한다.
+다른 인자를 함께 주면 오류로 종료하며 정상 실행으로 이어지지 않는다.
+
+```sh
+python3 tools/release/test_verify_build.py
+python3 tools/release/verify_build.py build-product/bin \
+  --expected-revision "$(git rev-parse HEAD)" --platform Darwin \
+  --output build-product/build-info.json
+```
+
+Windows는 실행 파일이 모인 staging 폴더와 `--platform Windows`를 사용한다.
+빌드마다 필요한 구성 요소, 전체 Git revision, configure 시 생성한 build ID,
+플랫폼·아키텍처·컴파일러·Release 설정이 모두 일치해야 한다. 빌드 때 Git 상태를
+갱신하므로 configure 이후 소스를 수정한 개발 빌드도 dirty로 기록된다.
+dirty는 기본 거부하며 개발용 `--allow-dirty`를 명시해도 receipt에 그대로 남는다.
+커밋 후에는 다시 빌드해야 clean 상태와 새 revision이 실행 파일에 반영된다.
+
+이 도구는 신뢰하는 소스로 **직접 빌드한 실행 파일에만** 사용한다. marker가 없는
+옛 실행 파일은 실행하지 않지만, marker는 악성 파일을 방어하는 sandbox가 아니다.
+metadata는 자기 보고이므로 소스의 암호학적 증명이나 재현 빌드 인증이 아니다.
+검사 후 각 실행 파일 SHA256을 기록하며, 실제 설치·OS 입력 수용은 별도다.
 
 2026-11-18 로컬 검증:
 

@@ -23,6 +23,7 @@
 #include "MainWindow.h"
 #include "AppConfig.h"
 #include "SetupWizard.h"
+#include "common/BuildInfo.h"
 
 #include <QtCore>
 #include <QtGui>
@@ -62,6 +63,7 @@ void copy_qsettings(const QSettings &src, QSettings &dst)
 
 int main(int argc, char* argv[])
 {
+    if (auto result = inputleap::handleBuildInfoRequest(argc, argv, inputleap::BuildComponent::Gui)) return *result;
 #if (defined(WINAPI_XWINDOWS) || \
     (defined(HAVE_LIBPORTAL_INPUTCAPTURE) || \
     defined(HAVE_LIBPORTAL_SESSION_CONNECT_TO_EIS)))
