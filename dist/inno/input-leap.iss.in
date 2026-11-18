@@ -1,11 +1,20 @@
 #define MyAppName "Input Leap Keymap"
-#define MyAppVersion "@INPUTLEAP_VERSION_MAJOR@.@INPUTLEAP_VERSION_MINOR@.@INPUTLEAP_VERSION_PATCH@.@INPUTLEAP_VERSION_DESC@"
+#define MyAppVersion "@INPUTLEAP_VERSION_MAJOR@.@INPUTLEAP_VERSION_MINOR@.@INPUTLEAP_VERSION_PATCH@.0"
 #define MyAppTextVersion "@INPUTLEAP_VERSION@"
 #define MyAppPublisher "Input Leap Keymap contributors"
-#define MyAppURL "https://github.com/johneybi/barrier-keymap"
+#define MyAppURL "https://github.com/johneybi/keystitch"
 #define MyAppCopyright "Copyright (C) Input Leap Keymap contributors"
 #define MyAppExeName "input-leap.exe"
 #define MyAppListenerDesc "Input Leap Keymap Listener"
+
+; CMake installs the current MSVC runtime beside the application. Do not
+; fall back to downloading an obsolete runtime during end-user setup.
+#if !FileExists("@CMAKE_INSTALL_PREFIX@/msvcp140.dll") || !FileExists("@CMAKE_INSTALL_PREFIX@/vcruntime140.dll") || !FileExists("@CMAKE_INSTALL_PREFIX@/vcruntime140_1.dll")
+  #error Required app-local MSVC runtime is missing; run cmake --install first.
+#endif
+#if !FileExists("@CMAKE_INSTALL_PREFIX@/platforms/qwindows.dll")
+  #error Qt Windows platform plugin is missing from the staging directory.
+#endif
 
 [Setup]
 AppId={{D9785C41-CF76-4DC8-9460-FCA5EF15558A}
@@ -59,24 +68,3 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallRun]
 Filename: {sys}\netsh.exe; Parameters: "advfirewall firewall delete rule name=""{#MyAppListenerDesc}"""; Flags: runhidden
-
-[CustomMessages]
-DependenciesDir="redist"
-
-; shared code for installing the products
-#include "scripts\products.iss"
-#include "scripts\products\stringversion.iss"
-#include "scripts\products\winversion.iss"
-#include "scripts\products\msiproduct.iss"
-#include "scripts\products\vcredist2017.iss"
-
-[Code]
-function InitializeSetup(): boolean;
-begin
-	// initialize windows version
-	initwinversion();
-
-	vcredist2017('14'); // min allowed version is 14.0
-
-	Result := true;
-end;

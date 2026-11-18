@@ -20,6 +20,16 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 packaging_revision="$(git -C "$script_dir/../.." rev-parse HEAD)"
 python="${PYTHON:-python3}"
 
+verify_build_set() {
+    if [ "${KEYSTITCH_ALLOW_DIRTY:-0}" = 1 ]; then
+        "$python" "$script_dir/../../tools/release/verify_build.py" "$contents/MacOS" \
+            --expected-revision "$packaging_revision" --platform Darwin --allow-dirty "$@"
+    else
+        "$python" "$script_dir/../../tools/release/verify_build.py" "$contents/MacOS" \
+            --expected-revision "$packaging_revision" --platform Darwin "$@"
+    fi
+}
+
 if [ -z "$macdeployqt" ]; then
     macdeployqt="$(command -v macdeployqt || true)"
 fi
@@ -38,6 +48,7 @@ cp "$client" "$contents/MacOS/input-leapc"
 cp "$server" "$contents/MacOS/input-leaps"
 chmod 755 "$contents/MacOS/input-leap" \
     "$contents/MacOS/input-leapc" "$contents/MacOS/input-leaps"
+verify_build_set
 cp "$(dirname "$0")/bundle/InputLeap.app/Contents/Resources/InputLeap.icns" \
     "$contents/Resources/InputLeap.icns"
 cp LICENSE "$contents/Resources/LICENSE.txt"
@@ -101,3 +112,4 @@ codesign -d -r- "$app" 2>&1 | grep -F "identifier \"$bundle_id\"" >/dev/null
 # Signing changes Mach-O bytes; record final hashes only after signing.
 "$python" "$script_dir/../../tools/release/audit_macos_bundle.py" "$app" \
     --manifest "$app.audit.json"
+verify_build_set --output "$app.build.json"

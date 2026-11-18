@@ -56,6 +56,30 @@ dirty는 기본 거부하며 개발용 `--allow-dirty`를 명시해도 receipt�
 metadata는 자기 보고이므로 소스의 암호학적 증명이나 재현 빌드 인증이 아니다.
 검사 후 각 실행 파일 SHA256을 기록하며, 실제 설치·OS 입력 수용은 별도다.
 
+GUI Mac 패키징은 복사 직후와 최종 서명 직후에 이 검사를 실행한다. 최종 결과는
+`APP.build.json`에 기록한다. 개발 중 dirty 소스 묶음을 만들려면
+`KEYSTITCH_ALLOW_DIRTY=1`을 명시해야 하며 CI는 이를 사용하지 않는다.
+
+## CI 내부 후보 파일
+
+product workflow는 테스트 후 다음 산출물을 만든다. GitHub Release를 발행하거나
+설치 프로그램을 실행하지 않으며 사용자 컴퓨터의 앱을 교체하지 않는다.
+
+- Mac: 동일 빌드 3개 실행 파일을 포함한 앱 ZIP, Mach-O audit, build receipt,
+  ZIP SHA256. macOS 26 / Qt 6.10.3, 기존 ad-hoc 서명이며 notarization 없음.
+- Windows: 동일 빌드 4개 실행 파일로 만든 Inno 설치 EXE, build receipt, EXE SHA256.
+  CMake staging에 Qt와 MSVC runtime을 포함하고 개발용 PATH 없이 build probe 실행.
+  Inno 컴파일 시 주요 MSVC DLL과 Qt platform plugin 누락을 거부한다.
+  오래된 VC2017 런타임 HTTP 다운로드는 제거했다. 설치 파일은 아직 서명하지 않는다.
+
+Windows app-local runtime은 CMake의 `InstallRequiredSystemLibraries`로 모은다.
+[Microsoft 배포 방식](https://learn.microsoft.com/en-us/cpp/windows/choosing-a-deployment-method)
+중 app-local 방식이며, 이 파일의 보안 업데이트를 제품 업데이트에서 관리해야 한다.
+Qt 파일은 [windeployqt](https://doc.qt.io/qt-6.10/windows-deployment.html)가 모은다.
+DLL 존재 검사와 `--build-info` 통과는 모든 동적 plugin·GUI 초기화·깨끗한 PC에서의
+설치 성공을 입증하지 않는다. 기존 PC에 설치된 라이브러리의 영향을 배제하는
+깨끗한 VM 수용 테스트, 제3자 라이선스 묶음, 서명은 공개 배포 전 남은 조건이다.
+
 2026-11-18 로컬 검증:
 
 - 순수 parser/정책 검사 5개 통과. universal slice, 구형 load command,

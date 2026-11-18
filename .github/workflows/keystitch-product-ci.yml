@@ -14,7 +14,7 @@ concurrency:
   group: product-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Build/test only. These jobs do not publish installers, install a service,
+# Internal candidate artifacts only. These jobs do not publish releases, install a service,
 # inject OS input, or certify a release's minimum OS / IME compatibility.
 jobs:
   macos:
@@ -27,7 +27,9 @@ jobs:
       - name: Install build dependencies
         run: brew install ninja openssl@3
       - name: Test package audit policy
-        run: python3 tools/release/test_audit_macos_bundle.py
+        run: |
+          python3 tools/release/test_audit_macos_bundle.py
+          python3 tools/release/test_verify_build.py
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.10.3'
@@ -46,6 +48,25 @@ jobs:
         run: cmake --build build --parallel 3 --target input-leap input-leapc input-leaps unittests desktopunittests guiunittests
       - name: Run all unit suites
         run: ctest --test-dir build --output-on-failure -R '^(unittests|desktopunittests|guiunittests)$'
+      - name: Package isolated macOS candidate
+        env:
+          INPUTLEAP_MINIMUM_MACOS: '26.0'
+        run: |
+          mkdir -p build/candidate
+          sh dist/macos/package_keymap_gui.sh \
+            build/bin/input-leap build/bin/input-leapc build/bin/input-leaps \
+            build/candidate/KeyStitch.app
+          ditto -c -k --sequesterRsrc --keepParent build/candidate/KeyStitch.app build/candidate/KeyStitch-macOS.zip
+          shasum -a 256 build/candidate/KeyStitch-macOS.zip > build/candidate/SHA256SUMS
+      - name: Upload macOS candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: keystitch-macos-candidate-${{ github.sha }}
+          path: |
+            build/candidate/*.zip
+            build/candidate/*.json
+            build/candidate/SHA256SUMS
+          if-no-files-found: error
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -75,7 +96,10 @@ jobs:
           Expand-Archive deps/BonjourSDKLike.zip -DestinationPath deps/BonjourSDKLike
           "path=$env:GITHUB_WORKSPACE\deps\BonjourSDKLike" >> $env:GITHUB_OUTPUT
       - name: Test package audit policy
-        run: python tools/release/test_audit_macos_bundle.py
+        run: |
+          python tools/release/test_audit_macos_bundle.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/release/test_verify_build.py
       - name: Configure
         shell: pwsh
         env:
@@ -83,6 +107,7 @@ jobs:
         run: |
           cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 `
             -DCMAKE_BUILD_TYPE=Release -DQT_DEFAULT_MAJOR_VERSION=6 `
+            -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE/build/install" `
             -DINPUTLEAP_BUILD_GUI=ON -DINPUTLEAP_BUILD_TESTS=ON `
             -DINPUTLEAP_BUILD_AUDIO_DAEMON=OFF `
             -DDNSSD_LIB="${{ steps.bonjour.outputs.path }}\Lib\x64\dnssd.lib"
@@ -91,6 +116,36 @@ jobs:
         run: cmake --build build --config Release --parallel 3 --target input-leap input-leapc input-leaps input-leapd unittests desktopunittests guiunittests
       - name: Run all unit suites
         run: ctest --test-dir build -C Release --output-on-failure -R '^(unittests|desktopunittests|guiunittests)$'
+      - name: Stage and verify Windows candidate
+        shell: pwsh
+        run: |
+          cmake --install build --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item LICENSE build/install/LICENSE.txt
+          # Probe with developer Qt paths removed: staged files must load on their own.
+          $python = (Get-Command python).Source
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & $python tools/release/verify_build.py build/install `
+            --expected-revision "$env:GITHUB_SHA" --platform Windows --output build/windows-build.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile Windows installer without installing
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $compiler build/installer-inno/input-leap.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem build/installer-inno/bin/*.exe | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content build/windows-SHA256SUMS
+      - name: Upload Windows candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: keystitch-windows-candidate-${{ github.sha }}
+          path: |
+            build/installer-inno/bin/*.exe
+            build/windows-build.json
+            build/windows-SHA256SUMS
+          if-no-files-found: error
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
