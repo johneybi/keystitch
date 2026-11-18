@@ -30,8 +30,13 @@ function Install-App($Installer, $Directory, $LogName) {
     if ($setup.ExitCode -ne 0) { throw "$Installer exited with code $($setup.ExitCode)" }
 }
 
-function Get-BootTime {
-    return (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime()
+function Get-BootEvent {
+    # Event record IDs remain ordered when Windows setup adjusts the guest clock.
+    $event = Get-WinEvent -FilterHashtable @{
+        LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-General'; Id = 12
+    } -MaxEvents 1
+    $xml = [xml]$event.ToXml()
+    return @{ recordId = $event.RecordId; timestamp = $xml.Event.System.TimeCreated.SystemTime }
 }
 
 function Initialize-Upgrade {
@@ -75,7 +80,7 @@ function Initialize-Upgrade {
     }
 
     $baseline = @{
-        bootTime = (Get-BootTime).ToString('o')
+        boot = Get-BootEvent
         legacyBeforeUpgrade = ($legacy | Select-Object StartMode, State, PathName)
         legacyAfterUpgrade = ($legacyAfter | Select-Object StartMode, State, PathName)
         candidateSha256 = (Get-FileHash -LiteralPath "$candidateInstall\input-leap.exe").Hash
@@ -98,9 +103,9 @@ function Initialize-Upgrade {
 
 function Confirm-AfterReboot {
     $baseline = Get-Content -LiteralPath "$oem\before-reboot.json" -Raw | ConvertFrom-Json
-    $bootTime = Get-BootTime
-    if ($bootTime -le [DateTime]::Parse($baseline.bootTime).ToUniversalTime()) {
-        throw 'Windows boot time has not changed'
+    $boot = Get-BootEvent
+    if ($boot.recordId -le $baseline.boot.recordId) {
+        throw "No new Windows kernel boot event after event $($baseline.boot.recordId)"
     }
     $deadline = [DateTime]::UtcNow.AddMinutes(3)
     do {
@@ -116,8 +121,7 @@ function Confirm-AfterReboot {
 
     if (-not $listener -or $gui[0].ExecutablePath -ne "$candidateInstall\input-leap.exe" -or
         $engine[0].ExecutablePath -ne "$candidateInstall\input-leaps.exe" -or
-        $engine[0].ParentProcessId -ne $gui[0].ProcessId -or $gui[0].SessionId -eq 0 -or
-        $gui[0].CreationDate.ToUniversalTime() -lt $bootTime) {
+        $engine[0].ParentProcessId -ne $gui[0].ProcessId -or $gui[0].SessionId -eq 0) {
         throw 'The candidate GUI and its sharing engine did not start in the logged-in session after reboot'
     }
     $legacy = Get-CimInstance Win32_Service -Filter "Name='Barrier'"
@@ -136,7 +140,7 @@ function Confirm-AfterReboot {
         }
     }
     Write-Evidence 'reboot-pass.json' @{
-        previousBootTime = $baseline.bootTime; currentBootTime = $bootTime.ToString('o')
+        previousBoot = $baseline.boot; currentBoot = $boot
         gui = ($gui[0] | Select-Object ProcessId, ParentProcessId, ExecutablePath, SessionId, CreationDate)
         engine = ($engine[0] | Select-Object ProcessId, ParentProcessId, ExecutablePath, CommandLine)
         legacy = ($legacy | Select-Object State, StartMode, PathName)
