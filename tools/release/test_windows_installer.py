@@ -29,12 +29,22 @@ def run_installer(executable, log, *options):
                     f"/LOG={log}", *options], check=True, timeout=180)
 
 
+def listener_rule_count():
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    command = ("$ErrorActionPreference = 'Stop'\n"
+               "@(Get-NetFirewallRule -PolicyStore PersistentStore | "
+               "Where-Object DisplayName -eq 'Input Leap Keymap Listener').Count")
+    result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", command],
+                            check=True, capture_output=True, text=True, timeout=60)
+    return int(result.stdout.strip())
+
+
 def main(candidate, evidence):
     if sys.platform != "win32" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise ValueError("Requires a disposable GitHub-hosted Windows runner")
     revision = os.environ["GITHUB_SHA"]
     target = Path(os.environ["RUNNER_TEMP"]) / "KeyStitch install test"
-    if target.exists() or registered_location() is not None:
+    if target.exists() or registered_location() is not None or listener_rule_count() != 0:
         raise ValueError("Expected a fresh machine and an unused install location")
     evidence.mkdir(parents=True, exist_ok=True)
     installer, = candidate.rglob("*.exe")
@@ -51,6 +61,8 @@ def main(candidate, evidence):
                       "/RESTARTEXITCODE=42", f"/DIR={target}")
         if registered_location() != target:
             raise ValueError(f"{phase}: wrong installed location in Add/Remove Programs")
+        if listener_rule_count() != 1:
+            raise ValueError(f"{phase}: expected one persistent listener firewall rule")
         installed = verify(target, revision, "Windows")
         if installed != staged:
             raise ValueError(f"{phase}: installed executables differ from staged executables")
@@ -64,7 +76,9 @@ def main(candidate, evidence):
         time.sleep(0.5)
     if target.exists() or registered_location() is not None:
         raise ValueError("Uninstall left the install directory or product registration behind")
-    print("Uninstall removed the install directory and product registration")
+    if listener_rule_count() != 0:
+        raise ValueError("Uninstall left a persistent listener firewall rule behind")
+    print("Uninstall removed the install directory, product registration and listener rule")
 
 
 if __name__ == "__main__":
