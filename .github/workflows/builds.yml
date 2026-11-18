@@ -446,13 +446,8 @@ jobs:
       - name: Download Bonjour SDK-like
         id: bonjour
         run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -Force -ItemType Directory -Path .\deps
-
-          Invoke-WebRequest 'https://github.com/nelsonjchen/mDNSResponder/releases/download/v2019.05.08.1/x64_RelWithDebInfo.zip' -OutFile 'deps\BonjourSDKLike.zip' ;
-          Expand-Archive .\deps\BonjourSDKLike.zip -DestinationPath .\deps\BonjourSDKLike
-          Remove-Item deps\BonjourSDKLike.zip
-
+          python input-leap/tools/release/stage_bonjour_sdk.py deps/BonjourSDKLike
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "path=$env:GITHUB_WORKSPACE\deps\BonjourSDKLike" >> $env:GITHUB_OUTPUT
 
       - name: Install Qt

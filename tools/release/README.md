@@ -92,3 +92,11 @@ DLL 존재 검사와 `--build-info` 통과는 모든 동적 plugin·GUI 초기�
 시험 묶음 위치는 `build-product/staging/KeyStitch-development.app`이며 실행하지
 않았다. Qt 5 로컬 개발 산출물로, 소스 provenance·구형 OS·설치 수용·Developer ID
 서명·notarization이 확인된 출시 파일이 아니다. 현재 `/Applications` 앱은 보존했다.
+
+Windows CI는 `stage_bonjour_sdk.py`로 Bonjour SDK를 준비한다. 원본은
+[mDNSResponder v2019.05.08.1](https://github.com/nelsonjchen/mDNSResponder/releases/tag/v2019.05.08.1)의
+x64 RelWithDebInfo ZIP(자산 ID 12460054)이다. 저장소에 고정한 해시는 이
+자산을 내려받아 계산했다. 다음 빌드에서 같은 바이트를 사용하는지 확인하고,
+크기나 SHA256이 다르면 파일을 풀기 전에 중단한다. 보관해 둔 ZIP도
+`python tools/release/stage_bonjour_sdk.py deps/BonjourSDKLike --archive SDK.zip`으로
+같은 검사를 거쳐 사용할 수 있다.
