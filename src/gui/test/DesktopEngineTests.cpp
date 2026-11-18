@@ -79,7 +79,7 @@ TEST(DesktopEngineTests, OnlyCompleteCurrentChildStatusRecordsChangePeerState)
     ASSERT_TRUE(waitUntil([&] { return engine.state() == DesktopEngine::State::Retrying; }));
     EXPECT_EQ((QList<PeerStatus>{PeerStatus::Listening, PeerStatus::Connected,
                                 PeerStatus::Disconnected, PeerStatus::Connecting,
-                                PeerStatus::Unknown}), observed);
+                                PeerStatus::ConnectedEncrypted, PeerStatus::Unknown}), observed);
     EXPECT_EQ(PeerStatus::Unknown, engine.peerStatus());
     engine.stop();
 }

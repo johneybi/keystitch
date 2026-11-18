@@ -21,6 +21,7 @@ int main(int argc, char** argv)
             reportPeerStatus(PeerStatus::Connected);
             reportPeerStatus(PeerStatus::Disconnected);
             reportPeerStatus(PeerStatus::Connecting);
+            reportPeerStatus(PeerStatus::ConnectedEncrypted);
             // A truncated final record must never confirm a connection.
             std::printf("%s%s connected", peerStatusPrefix, tag.constData());
             return 0;

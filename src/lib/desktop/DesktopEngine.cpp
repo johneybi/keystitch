@@ -36,7 +36,7 @@ void DesktopEngine::setPeerStatus(PeerStatus status)
 {
     if (peer_ == status) return;
     peer_ = status;
-    if (peer_ == PeerStatus::Connected) resetBackoff();
+    if (peer_ == PeerStatus::Connected || peer_ == PeerStatus::ConnectedEncrypted) resetBackoff();
     Q_EMIT peerStatusChanged(status);
 }
 

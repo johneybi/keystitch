@@ -272,7 +272,7 @@ void ClientApp::cancelClientRestart()
 
 void ClientApp::handle_client_connected()
 {
-    reportPeerStatus(PeerStatus::Connected);
+    reportPeerStatus(args().m_enableCrypto ? PeerStatus::ConnectedEncrypted : PeerStatus::Connected);
     cancelClientRestart();
     // using CLOG_PRINT here allows the GUI to see that the client is connected
     // regardless of which log level is set

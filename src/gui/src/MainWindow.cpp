@@ -147,7 +147,8 @@ MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig, inputleap::Des
     connect(&engine_, &Engine::peerStatusChanged, this, [this](inputleap::PeerStatus status) {
         using inputleap::PeerStatus;
         switch (status) {
-        case PeerStatus::Connected: peerConnected(); break;
+        case PeerStatus::Connected:
+        case PeerStatus::ConnectedEncrypted: peerConnected(); break;
         case PeerStatus::Listening: set_connection_state(AppConnectionState::LISTENING); break;
         case PeerStatus::Connecting:
         case PeerStatus::Disconnected: set_connection_state(AppConnectionState::WAITING_FOR_PEER); break;
@@ -821,6 +822,8 @@ void MainWindow::stopService()
 
 void MainWindow::set_connection_state(AppConnectionState state)
 {
+    ui_->m_pLabelPadlock->setVisible(state == AppConnectionState::CONNECTED &&
+        engine_.peerStatus() == inputleap::PeerStatus::ConnectedEncrypted);
     if (connection_state() == state)
         return;
 
@@ -846,31 +849,20 @@ void MainWindow::set_connection_state(AppConnectionState state)
     switch (state)
     {
     case AppConnectionState::CONNECTED: {
-        if (m_AppConfig->getCryptoEnabled()) {
-            ui_->m_pLabelPadlock->show();
-        }
-        else {
-            ui_->m_pLabelPadlock->hide();
-        }
-
         setStatus(tr("Connected to a peer."));
 
         break;
     }
     case AppConnectionState::LISTENING:
-        ui_->m_pLabelPadlock->hide();
         setStatus(tr("Listening for clients."));
         break;
     case AppConnectionState::WAITING_FOR_PEER:
-        ui_->m_pLabelPadlock->hide();
         setStatus(tr("Waiting for a peer connection."));
         break;
     case AppConnectionState::CONNECTING:
-        ui_->m_pLabelPadlock->hide();
         setStatus(tr("InputLeap is starting."));
         break;
     case AppConnectionState::DISCONNECTED:
-        ui_->m_pLabelPadlock->hide();
         setStatus(tr("InputLeap is not running."));
         break;
     case AppConnectionState::TRANSFERRING:

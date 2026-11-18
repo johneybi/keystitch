@@ -2130,7 +2130,7 @@ Server::addClient(BaseClientProxy* client)
 	m_clients.insert(std::make_pair(name, client));
     // One entry is the local primary screen.
     if (client != m_primaryClient && m_clients.size() == 2) {
-        reportPeerStatus(PeerStatus::Connected);
+        reportPeerStatus(m_args.m_enableCrypto ? PeerStatus::ConnectedEncrypted : PeerStatus::Connected);
     }
 
 	// initialize client data
