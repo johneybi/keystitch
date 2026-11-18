@@ -11,7 +11,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: product-${{ github.workflow }}-${{ github.ref }}
+  # An explicit guest reboot run can continue while routine CI checks another push.
+  group: product-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[vm reboot]')) && 'reboot' || 'routine' }}
   cancel-in-progress: true
 
 # Internal candidate artifacts only. These jobs do not publish releases, install a service,

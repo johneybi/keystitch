@@ -1,5 +1,6 @@
 const
   PublicUninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{41036EA6-3F7A-4803-8AE0-469E5E91EFCC}_is1';
+  PublicServiceSHA256 = '51cb03102a757dd17f8aaa2069a5b014347890d3e1ff912ea04b4d8f49993f87';
   LegacyServiceKey = 'SYSTEM\CurrentControlSet\Services\Barrier';
   StartupKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   StartupName = 'KeyStitch';
@@ -26,7 +27,7 @@ function QueryServiceStatus(Handle: THandle; var Status: TServiceStatus): Boolea
 
 function IsPublicAutomaticService(): Boolean;
 var
-  Location, ImagePath: String;
+  Location, ImagePath, ExpectedImage: String;
   StartMode: Cardinal;
 begin
   Result := False;
@@ -36,8 +37,13 @@ begin
     Exit;
   if not RegQueryDWordValue(HKLM64, LegacyServiceKey, 'Start', StartMode) then
     Exit;
-  Result := (StartMode = StartAutomatic) and
-    (CompareText(RemoveQuotes(ImagePath), AddBackslash(Location) + 'barrierd.exe') = 0);
+  ExpectedImage := AddBackslash(Location) + 'barrierd.exe';
+  if (StartMode <> StartAutomatic) or (CompareText(RemoveQuotes(ImagePath), ExpectedImage) <> 0) then
+    Exit;
+  if not FileExists(ExpectedImage) then
+    Exit;
+  { Other Barrier builds can have the same Inno AppId and service name. }
+  Result := CompareText(GetSHA256OfFile(ExpectedImage), PublicServiceSHA256) = 0;
 end;
 
 function RunServiceCommand(Arguments: String; var ExitCode: Integer): Boolean;
