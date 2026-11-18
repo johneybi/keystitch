@@ -92,6 +92,14 @@ Mac CI의 실행기는 macOS 26이다. 기존 macos-14 실행기는 지원 종�
 시작되지 않아 교체했다. CI 성공 여부와 실제 입력 수용은 별도다.
 이 workflow는 설치 파일을 공개하거나 서비스를 설치하지 않는다.
 
+**원격 검증 완료:** 코드 커밋 `166c4353c8ad8437e507e788a93ca85e136fb804`의
+[CI 실행 44240488619](https://github.com/johneybi/keystitch/actions/runs/44240488619)는
+Windows와 macOS 모두 성공했다. 업로드된 `LastTest.log`에서 Mac은
+237 core + 6 desktop + 58 GUI = **301개**, Windows는
+172 core + 6 desktop + 58 GUI = **236개** 통과를 확인했다.
+패키지 parser/정책 테스트 **5개도 각 OS에서 통과**했다.
+OS별 platform suite가 달라 개수에 차이가 있다. 설치·실제 입력 수용의 증거는 아니다.
+
 전체 CI를 처음 연결하며 기존 Windows 재접속 코드의 `min` 매크로 충돌도
 수정했다. 기존 GUI 저장 테스트는 임시 파일 경로에 NativeFormat을 사용해
 Windows 레지스트리로 잘못 해석하던 부분을 IniFormat으로 바꾸고 I/O 상태를
