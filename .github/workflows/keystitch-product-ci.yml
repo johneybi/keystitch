@@ -194,3 +194,76 @@ jobs:
           name: product-windows-upgrade-evidence
           path: upgrade-evidence/
           if-no-files-found: warn
+
+  windows-reboot:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[vm reboot]')
+    needs: windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: keystitch-windows-candidate-${{ github.sha }}
+          path: candidate
+      - name: Prepare verified setup files for the Windows guest
+        run: |
+          mkdir -p reboot-guest/oem reboot-guest/evidence
+          PYTHONPATH=tools/release python3 - <<'PY'
+          import shutil
+          from pathlib import Path
+          from test_windows_installer import read_candidate
+          installer, _ = read_candidate(Path("candidate"))
+          shutil.copyfile(installer, "reboot-guest/oem/candidate.exe")
+          PY
+          curl --fail --location --retry 3 --output reboot-guest/oem/public.exe \
+            https://github.com/johneybi/keystitch/releases/download/keystitch-v0.1.0/keystitch-windows-x64.exe
+          shasum -a 256 -c <<'CHECKSUM'
+          cbec8d381ebe5f5b5c9d0a712e300ca11ca5ac9d5447aa237b832fd057466ffe  reboot-guest/oem/public.exe
+          CHECKSUM
+          curl --fail --location --retry 3 --output reboot-guest/oem/vc_redist.x64.exe \
+            https://aka.ms/vs/17/release/vc_redist.x64.exe
+          cp tools/release/windows_reboot_guest.ps1 reboot-guest/oem/
+          printf '%s\r\n' '@echo off' 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\OEM\windows_reboot_guest.ps1' \
+            > reboot-guest/oem/install.bat
+      - name: Boot the isolated Windows guest and verify the second boot
+        run: |
+          accelerator=()
+          if [[ -c /dev/kvm ]]; then
+            accelerator+=(--device /dev/kvm)
+          else
+            accelerator+=(-e KVM=N)
+          fi
+          df -h .
+          printf 'Guest acceleration options: %s\n' "${accelerator[*]}"
+          docker run -d --name keystitch-reboot-guest \
+            "${accelerator[@]}" --device /dev/net/tun --cap-add NET_ADMIN \
+            -e VERSION=2022 -e RAM_SIZE=5G -e CPU_CORES=4 -e DISK_SIZE=40G \
+            -e "PASSWORD=$(openssl rand -hex 18)Z1!" \
+            -v "$PWD/reboot-guest/oem:/oem:ro" -v "$PWD/reboot-guest/evidence:/shared" \
+            dockurr/windows@sha256:59f8bed19cfd49cf1701debe34f9df6311e61a4e2ae68aa9f41206e2184e31cc
+          for attempt in $(seq 1 200); do
+            if [[ -s reboot-guest/evidence/reboot-failure.json ]]; then
+              cat reboot-guest/evidence/reboot-failure.json
+              exit 1
+            fi
+            if [[ -s reboot-guest/evidence/reboot-pass.json ]]; then
+              python3 -c 'import json; print(json.dumps(json.load(open("reboot-guest/evidence/reboot-pass.json", encoding="utf-8-sig")), indent=2))'
+              exit 0
+            fi
+            if [[ $(docker inspect -f '{{.State.Running}}' keystitch-reboot-guest) != true ]]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          exit 1
+      - name: Collect guest console
+        if: always()
+        run: docker logs keystitch-reboot-guest > reboot-guest/evidence/guest-console.log 2>&1 || true
+      - name: Upload reboot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-windows-reboot-evidence
+          path: reboot-guest/evidence/
+          if-no-files-found: warn
