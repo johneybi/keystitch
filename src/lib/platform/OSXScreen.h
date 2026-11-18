@@ -23,6 +23,7 @@
 #include "inputleap/DragInformation.h"
 #include "base/EventTypes.h"
 #include "base/Fwd.h"
+#include "base/MacInputSourceBackend.h"
 
 #include <Carbon/Carbon.h>
 #include <mach/mach_port.h>
@@ -52,7 +53,8 @@ class OSXScreenSaver;
 //! Implementation of IPlatformScreen for OS X
 class OSXScreen : public PlatformScreen {
 public:
-    OSXScreen(IEventQueue* events, bool isPrimary, bool autoShowHideCursor=true);
+    OSXScreen(IEventQueue* events, bool isPrimary, bool autoShowHideCursor=true,
+              std::optional<MacInputSourceBackend> backend = std::nullopt);
     virtual ~OSXScreen();
 
     IEventQueue* getEvents() const { return m_events; }

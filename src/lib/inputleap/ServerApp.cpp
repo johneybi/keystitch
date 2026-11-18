@@ -905,7 +905,7 @@ std::unique_ptr<IPlatformScreen> ServerApp::create_platform_screen()
     }
 #endif
 #if WINAPI_CARBON
-    return std::make_unique<OSXScreen>(m_events, true);
+    return std::make_unique<OSXScreen>(m_events, true, true, args().mac_input_source_backend);
 #endif
     throw std::runtime_error("Failed to create screen, this shouldn't happen");
 }

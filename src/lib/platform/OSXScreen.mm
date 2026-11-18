@@ -67,7 +67,8 @@ void avoidHesitatingCursor();
 bool					OSXScreen::s_testedForGHOM = false;
 bool					OSXScreen::s_hasGHOM	    = false;
 
-OSXScreen::OSXScreen(IEventQueue* events, bool isPrimary, bool autoShowHideCursor) :
+OSXScreen::OSXScreen(IEventQueue* events, bool isPrimary, bool autoShowHideCursor,
+                     std::optional<MacInputSourceBackend> backend) :
 	m_isPrimary(isPrimary),
 	m_isOnScreen(m_isPrimary),
 	assertionID(0),
@@ -118,7 +119,7 @@ OSXScreen::OSXScreen(IEventQueue* events, bool isPrimary, bool autoShowHideCurso
 				"unable to determine a usable macOS display shape");
 		}
         m_screensaver = new OSXScreenSaver(m_events, get_event_target());
-		m_keyState	  = new OSXKeyState(m_events);
+        m_keyState = new OSXKeyState(m_events, backend);
 
 		// only needed when running as a server.
 		if (m_isPrimary) {

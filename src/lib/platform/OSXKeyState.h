@@ -43,7 +43,8 @@ class OSXKeyState : public KeyState {
 public:
     typedef std::vector<KeyID> KeyIDs;
 
-    OSXKeyState(IEventQueue* events);
+    OSXKeyState(IEventQueue* events,
+                std::optional<MacInputSourceBackend> backend = std::nullopt);
     OSXKeyState(IEventQueue* events, inputleap::KeyMap& keyMap);
     virtual ~OSXKeyState();
 
@@ -174,7 +175,7 @@ private:
     // mapVirtualKeyToKeyButton.
     static std::uint32_t mapKeyButtonToVirtualKey(KeyButton keyButton);
 
-    void init();
+    void init(std::optional<MacInputSourceBackend> backend = std::nullopt);
 
 private:
     // OS X uses a physical key if 0 for the 'A' key.  InputLeap reserves

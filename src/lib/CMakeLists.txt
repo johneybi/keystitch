@@ -29,3 +29,7 @@ add_subdirectory(net)
 add_subdirectory(platform)
 add_subdirectory(server)
 add_subdirectory(inputleap)
+
+if(INPUTLEAP_BUILD_GUI)
+    add_subdirectory(desktop)
+endif()

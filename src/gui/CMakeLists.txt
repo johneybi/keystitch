@@ -193,6 +193,7 @@ add_executable (input-leap WIN32
 include_directories (./src)
 
 target_link_libraries(input-leap
+    desktop_settings
     net
     arch
     base
@@ -251,6 +252,13 @@ elseif(WIN32)
 endif()
 
 if(INPUTLEAP_BUILD_TESTS)
+    add_executable(desktopunittests
+        test/KeyboardSettingsTests.cpp
+        test/main.cpp
+    )
+    target_link_libraries(desktopunittests desktop_settings ${GTEST_LIBRARIES})
+    add_test(NAME desktopunittests COMMAND desktopunittests)
+
     set(GUI_TEST_SOURCE_FILES
         test/KeySequenceTests.cpp
         test/HotkeyTests.cpp

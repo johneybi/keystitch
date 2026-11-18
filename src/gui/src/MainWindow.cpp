@@ -592,6 +592,18 @@ void MainWindow::start_cmd_app()
     QString app;
     QStringList args;
 
+#if defined(Q_OS_MAC)
+    QString keyboardSettingsError;
+    if (!appConfig().keyboardSettings().appendLaunchArguments(
+            inputleap::DesktopPlatform::MacOS, args, keyboardSettingsError)) {
+        appendLogError(keyboardSettingsError);
+        stop_cmd_app();
+        show();
+        QMessageBox::warning(this, tr("Keyboard settings"), keyboardSettingsError);
+        return;
+    }
+#endif
+
     args << "-f" << "--no-tray" << "--debug" << appConfig().logLevelText();
 
 

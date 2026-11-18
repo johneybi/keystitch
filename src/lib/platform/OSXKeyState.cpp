@@ -224,10 +224,10 @@ static const KeyEntry    s_controlKeys[] = {
 // OSXKeyState
 //
 
-OSXKeyState::OSXKeyState(IEventQueue* events) :
+OSXKeyState::OSXKeyState(IEventQueue* events, std::optional<MacInputSourceBackend> backend) :
     KeyState(events), m_nativeEvents(events)
 {
-    init();
+    init(backend);
 }
 
 OSXKeyState::OSXKeyState(IEventQueue* events, inputleap::KeyMap& keyMap) :
@@ -242,12 +242,15 @@ OSXKeyState::~OSXKeyState()
 }
 
 void
-OSXKeyState::init()
+OSXKeyState::init(std::optional<MacInputSourceBackend> backend)
 {
     m_deadKeyState = 0;
     m_pressedModifiers.clear();
-    const char* backend = std::getenv("INPUTLEAP_MACOS_IME_BACKEND");
-    m_inputSourceBackend = ParseOSXInputSourceBackend(backend == nullptr ? "" : backend);
+    const auto selection = resolveMacInputSourceBackend(
+        backend, std::getenv("INPUTLEAP_MACOS_IME_BACKEND"));
+    m_inputSourceBackend = selection.backend;
+    LOG_INFO("input source backend=%s source=%s (IME readiness unverified)",
+             macInputSourceBackendName(selection.backend), selection.source);
 
     // build virtual key map
     for (size_t i = 0; i < sizeof(s_controlKeys) / sizeof(s_controlKeys[0]);

@@ -237,8 +237,17 @@ ArgParser::parseMSWindowsArg(ArgsBase& argsBase, Argv& argv)
 bool
 ArgParser::parseCarbonArg(ArgsBase& argsBase, Argv& argv)
 {
-    // no options for carbon
-    return false;
+    const char* value = nullptr;
+    if (!argv.shift("--macos-ime-backend", nullptr, &value)) return false;
+    const auto backend = parseMacInputSourceBackend(value);
+    if (backend == MacInputSourceBackend::Invalid) {
+        throw XArgvParserError("--macos-ime-backend must be native-shortcut or direct-tis");
+    }
+    if (argsBase.mac_input_source_backend) {
+        throw XArgvParserError("--macos-ime-backend may only be specified once");
+    }
+    argsBase.mac_input_source_backend = backend;
+    return true;
 }
 #endif
 

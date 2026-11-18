@@ -19,6 +19,7 @@
 #pragma once
 
 #include "io/filesystem.h"
+#include "base/MacInputSourceBackend.h"
 
 namespace inputleap {
 
@@ -54,6 +55,7 @@ public:
     bool use_x11 = false;
     bool use_ei = false;
     bool use_portal = true; // use the XDG portals for ei
+    std::optional<MacInputSourceBackend> mac_input_source_backend;
 };
 
 } // namespace inputleap

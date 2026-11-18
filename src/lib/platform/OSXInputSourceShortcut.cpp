@@ -62,18 +62,13 @@ std::int64_t carbonFlags(std::uint64_t flags)
 
 OSXInputSourceBackend ParseOSXInputSourceBackend(const std::string& value)
 {
-    if (value.empty() || value == "direct-tis") return OSXInputSourceBackend::DirectTIS;
-    if (value == "native-shortcut") return OSXInputSourceBackend::NativeShortcut;
-    return OSXInputSourceBackend::Invalid;
+    if (value.empty()) return OSXInputSourceBackend::DirectTIS;
+    return parseMacInputSourceBackend(value);
 }
 
 const char* OSXInputSourceBackendName(OSXInputSourceBackend backend)
 {
-    switch (backend) {
-    case OSXInputSourceBackend::DirectTIS: return "direct-tis";
-    case OSXInputSourceBackend::NativeShortcut: return "native-shortcut";
-    default: return "invalid";
-    }
+    return macInputSourceBackendName(backend);
 }
 
 OSXInputSourceShortcutResult ParseOSXInputSourceShortcut(CFPropertyListRef preferences)

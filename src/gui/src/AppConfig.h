@@ -21,6 +21,7 @@
 #include <QObject>
 #include <QString>
 #include "ElevateMode.h"
+#include "desktop/KeyboardSettings.h"
 
 // this should be incremented each time a new page is added. this is
 // saved to settings when the user finishes running the wizard. if
@@ -102,6 +103,7 @@ class AppConfig: public QObject
         bool getMinimizeToTray();
 
         void saveSettings();
+        inputleap::KeyboardSettings keyboardSettings() { return inputleap::KeyboardSettings(*m_pSettings); }
 
 protected:
         QSettings& settings();

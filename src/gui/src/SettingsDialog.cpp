@@ -56,6 +56,22 @@ SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config) :
     ui_->m_pCheckBoxEnableCrypto->setChecked(app_config_.getCryptoEnabled());
     ui_->checkbox_require_client_certificate->setChecked(app_config_.getRequireClientCertificate());
 
+#if defined(Q_OS_MAC)
+    ui_->m_pComboInputSource->addItem(tr("Use existing macOS shortcut (recommended)"), "native-shortcut");
+    ui_->m_pComboInputSource->addItem(tr("Select input source directly (legacy)"), "direct-tis");
+    const auto keyboard = app_config_.keyboardSettings().read();
+    if (!keyboard.valid()) {
+        ui_->m_pComboInputSource->addItem(tr("Saved method unavailable — choose a method"), keyboard.macInputSourceBackend);
+        ui_->m_pComboInputSource->setToolTip(keyboard.error);
+        ui_->m_pComboInputSource->setCurrentIndex(2);
+    } else {
+        setIndexFromItemData(ui_->m_pComboInputSource, keyboard.macInputSourceBackend);
+    }
+#else
+    ui_->m_pLabelInputSource->hide();
+    ui_->m_pComboInputSource->hide();
+#endif
+
 #if defined(Q_OS_WIN)
     ui_->m_pComboElevate->setCurrentIndex(static_cast<int>(app_config_.elevateMode()));
 #else
@@ -71,6 +87,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config) :
 
 void SettingsDialog::accept()
 {
+#if defined(Q_OS_MAC)
+    QString keyboardError;
+    if (!app_config_.keyboardSettings().saveMacInputSourceBackend(
+            ui_->m_pComboInputSource->currentData().toString(), keyboardError)) {
+        QMessageBox::warning(this, tr("Keyboard settings"), keyboardError);
+        return;
+    }
+#endif
     app_config_.setScreenName(ui_->m_pLineEditScreenName->text());
     app_config_.setPort(ui_->m_pSpinBoxPort->value());
     app_config_.setNetworkInterface(ui_->m_pLineEditInterface->text());

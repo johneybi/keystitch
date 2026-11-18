@@ -3,6 +3,7 @@
  */
 #pragma once
 
+#include "base/MacInputSourceBackend.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <cstdint>
 #include <string>
@@ -10,7 +11,7 @@
 
 namespace inputleap {
 
-enum class OSXInputSourceBackend { DirectTIS, NativeShortcut, Invalid };
+using OSXInputSourceBackend = MacInputSourceBackend;
 OSXInputSourceBackend ParseOSXInputSourceBackend(const std::string& value);
 const char* OSXInputSourceBackendName(OSXInputSourceBackend backend);
 

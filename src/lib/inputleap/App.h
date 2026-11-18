@@ -180,11 +180,19 @@ private:
 #if SYSAPI_UNIX
 
 // unix daemon mode args
+#if WINAPI_CARBON
+#  define HELP_MAC_INPUT_SOURCE \
+    "      --macos-ime-backend <method>  use native-shortcut or direct-tis.\n" \
+    "                           Overrides INPUTLEAP_MACOS_IME_BACKEND.\n"
+#else
+#  define HELP_MAC_INPUT_SOURCE ""
+#endif
 #  define HELP_SYS_ARGS \
     " [--daemon|--no-daemon]"
 #  define HELP_SYS_INFO \
     "  -f, --no-daemon          run in the foreground.\n"    \
-    "      --daemon             run as a daemon. (*)\n"
+    "      --daemon             run as a daemon. (*)\n" \
+    HELP_MAC_INPUT_SOURCE
 
 #elif SYSAPI_WIN32
 

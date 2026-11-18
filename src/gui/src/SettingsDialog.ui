@@ -32,6 +32,17 @@
       <property name="fieldGrowthPolicy">
        <enum>QFormLayout::AllNonFixedFieldsGrow</enum>
       </property>
+      <item row="6" column="0">
+       <widget class="QLabel" name="m_pLabelInputSource">
+        <property name="text"><string>Input source switching:</string></property>
+        <property name="buddy"><cstring>m_pComboInputSource</cstring></property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QComboBox" name="m_pComboInputSource">
+        <property name="toolTip"><string>Used when this Mac receives an input source switch key. Keeps your macOS shortcut and built-in keyboard settings. Takes effect the next time the connection starts.</string></property>
+       </widget>
+      </item>
       <item row="0" column="0">
        <widget class="QLabel" name="m_pLabel_27">
         <property name="sizePolicy">
