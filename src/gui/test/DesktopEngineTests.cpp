@@ -69,4 +69,18 @@ TEST(DesktopEngineTests, FailedLaunchCanBeReplacedAndRunningChildCanBeStopped)
     engine.stop();
     EXPECT_EQ(DesktopEngine::State::Stopped, engine.state());
 }
+TEST(DesktopEngineTests, OnlyCompleteCurrentChildStatusRecordsChangePeerState)
+{
+    DesktopEngine engine;
+    QList<PeerStatus> observed;
+    QObject::connect(&engine, &DesktopEngine::peerStatusChanged,
+                     [&](PeerStatus status) { observed << status; });
+    engine.start(QCoreApplication::applicationFilePath(), {"--fixture", "peer-events"});
+    ASSERT_TRUE(waitUntil([&] { return engine.state() == DesktopEngine::State::Retrying; }));
+    EXPECT_EQ((QList<PeerStatus>{PeerStatus::Listening, PeerStatus::Connected,
+                                PeerStatus::Disconnected, PeerStatus::Connecting,
+                                PeerStatus::Unknown}), observed);
+    EXPECT_EQ(PeerStatus::Unknown, engine.peerStatus());
+    engine.stop();
+}
 } // namespace inputleap

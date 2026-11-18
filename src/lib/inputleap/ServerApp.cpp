@@ -38,6 +38,7 @@
 #include "base/IEventQueue.h"
 #include "base/Log.h"
 #include "common/Version.h"
+#include "common/PeerStatus.h"
 #include "common/DataDirectories.h"
 
 #if SYSAPI_WIN32
@@ -368,6 +369,7 @@ ServerApp::stopServer()
         closeClientListener(m_listener);
         server_.reset();
         m_listener = nullptr;
+        reportPeerStatus(PeerStatus::Disconnected);
         m_serverState = kInitialized;
     }
     else if (m_serverState == kStarting) {
@@ -561,6 +563,7 @@ ServerApp::startServer()
         listener->setServer(server_.get());
         server_->setListener(listener);
         m_listener = listener;
+        reportPeerStatus(PeerStatus::Listening);
         updateStatus();
 
         // using CLOG_PRINT here allows the GUI to see that the server is started

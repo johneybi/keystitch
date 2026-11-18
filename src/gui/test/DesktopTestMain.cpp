@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+#include "common/PeerStatus.h"
 #include <QCoreApplication>
 #include <QTimer>
 #include <cstdio>
@@ -9,6 +10,21 @@ int main(int argc, char** argv)
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
     if (args.size() == 3 && args[1] == "--fixture") {
+        if (args[2] == "peer-events") {
+            using namespace inputleap;
+            const auto tag = qgetenv(peerStatusEnv);
+            std::puts("connected to server");
+            std::printf("%sother-run connected\n", peerStatusPrefix);
+            std::fprintf(stderr, "%s%s connected\n", peerStatusPrefix, tag.constData());
+            reportPeerStatus(PeerStatus::Listening);
+            reportPeerStatus(PeerStatus::Connected);
+            reportPeerStatus(PeerStatus::Connected);
+            reportPeerStatus(PeerStatus::Disconnected);
+            reportPeerStatus(PeerStatus::Connecting);
+            // A truncated final record must never confirm a connection.
+            std::printf("%s%s connected", peerStatusPrefix, tag.constData());
+            return 0;
+        }
         std::fputs("connec", stdout);
         std::fflush(stdout);
         std::fputs("diagnostic\n", stderr);

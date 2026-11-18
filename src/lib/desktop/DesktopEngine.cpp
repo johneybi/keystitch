@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "DesktopEngine.h"
 #include <QProcess>
+#include <QUuid>
 
 namespace inputleap {
 
@@ -27,7 +28,16 @@ void DesktopEngine::setState(State next)
 {
     if (state_ == next) return;
     state_ = next;
-    Q_EMIT stateChanged(next);
+    if (next != State::Running) setPeerStatus(PeerStatus::Unknown);
+    if (state_ == next) Q_EMIT stateChanged(next);
+}
+
+void DesktopEngine::setPeerStatus(PeerStatus status)
+{
+    if (peer_ == status) return;
+    peer_ = status;
+    if (peer_ == PeerStatus::Connected) resetBackoff();
+    Q_EMIT peerStatusChanged(status);
 }
 
 void DesktopEngine::start(const QString& program, const QStringList& arguments)
@@ -56,6 +66,16 @@ void DesktopEngine::drain(QProcess* child, bool standardError, bool atEnd)
         auto bytes = tail.left(length);
         tail.remove(0, newline < 0 ? length : length + 1);
         if (bytes.endsWith('\r')) bytes.chop(1);
+        if (!standardError && newline >= 0 && bytes.startsWith(statusPrefix_)) {
+            const auto value = bytes.mid(statusPrefix_.size());
+            for (const auto& record : peerStatusRecords) {
+                if (value == record.name) {
+                    setPeerStatus(record.state);
+                    break;
+                }
+            }
+            continue;
+        }
         Q_EMIT outputLine(QString::fromUtf8(bytes));
     }
 }
@@ -64,6 +84,11 @@ void DesktopEngine::launch()
 {
     auto* child = new QProcess(this);
     child_ = child;
+    const auto tag = QUuid::createUuid().toRfc4122().toHex();
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(peerStatusEnv, QString::fromLatin1(tag));
+    child->setProcessEnvironment(environment);
+    statusPrefix_ = QByteArray(peerStatusPrefix) + tag + ' ';
     stdoutTail_.clear();
     stderrTail_.clear();
     connect(child, &QProcess::started, this, [this, child] {

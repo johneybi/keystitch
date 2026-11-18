@@ -144,6 +144,16 @@ MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig, inputleap::Des
     ui_->setupUi(this);
     using Engine = inputleap::DesktopEngine;
     connect(&engine_, &Engine::outputLine, this, &MainWindow::appendLogRaw);
+    connect(&engine_, &Engine::peerStatusChanged, this, [this](inputleap::PeerStatus status) {
+        using inputleap::PeerStatus;
+        switch (status) {
+        case PeerStatus::Connected: peerConnected(); break;
+        case PeerStatus::Listening: set_connection_state(AppConnectionState::LISTENING); break;
+        case PeerStatus::Connecting:
+        case PeerStatus::Disconnected: set_connection_state(AppConnectionState::WAITING_FOR_PEER); break;
+        case PeerStatus::Unknown: break; // Process stop/exit has its own presentation.
+        }
+    });
     connect(&engine_, &Engine::retryScheduled, this, [this](int code, int delayMs) {
         set_connection_state(AppConnectionState::CONNECTING);
         setStatus(tr("Engine exited (%1). Retrying in %2 seconds.").arg(code).arg(delayMs / 1000));
@@ -433,30 +443,26 @@ void MainWindow::appendLogRaw(const QString& text)
 
 void MainWindow::updateFromLogLine(const QString &line)
 {
-    // TODO: this code makes Andrew cry
-    checkConnected(line);
+    // Windows service IPC still supplies the older log stream.
+    if (appConfig().processMode() == Service) {
+        if (line.startsWith("started server (") && line.endsWith("waiting for clients")) {
+            set_connection_state(AppConnectionState::LISTENING);
+        } else if (line == "connected to server") {
+            peerConnected();
+        }
+    }
     checkFingerprint(line);
 }
 
-void MainWindow::checkConnected(const QString& line)
+void MainWindow::peerConnected()
 {
-    // TODO: implement ipc connection state messages to replace this hack.
-    if (line.contains("started server") ||
-        line.contains("connected to server") ||
-        line.contains("server status: active"))
-    {
-        set_connection_state(AppConnectionState::CONNECTED);
-
-        if (!appConfig().startedBefore() && isVisible()) {
-                QMessageBox::information(
-                    this, "InputLeap",
-                    tr("InputLeap is now connected. You can close the "
-                    "config window and InputLeap will remain connected in "
-                    "the background."));
-
-            appConfig().setStartedBefore(true);
-            appConfig().saveSettings();
-        }
+    set_connection_state(AppConnectionState::CONNECTED);
+    if (!appConfig().startedBefore() && isVisible()) {
+        appConfig().setStartedBefore(true);
+        appConfig().saveSettings();
+        QMessageBox::information(this, "InputLeap",
+            tr("InputLeap is now connected. You can close the "
+               "config window and InputLeap will remain connected in the background."));
     }
 }
 
@@ -815,13 +821,10 @@ void MainWindow::stopService()
 
 void MainWindow::set_connection_state(AppConnectionState state)
 {
-    if (state == AppConnectionState::CONNECTED) {
-        engine_.resetBackoff();
-    }
     if (connection_state() == state)
         return;
 
-    if (state == AppConnectionState::CONNECTED || state == AppConnectionState::CONNECTING)
+    if (state != AppConnectionState::DISCONNECTED && state != AppConnectionState::TRANSFERRING)
     {
         disconnect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStartCmdApp, &QAction::trigger);
         connect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStopCmdApp, &QAction::trigger, Qt::UniqueConnection);
@@ -850,10 +853,18 @@ void MainWindow::set_connection_state(AppConnectionState state)
             ui_->m_pLabelPadlock->hide();
         }
 
-        setStatus(tr("InputLeap is running."));
+        setStatus(tr("Connected to a peer."));
 
         break;
     }
+    case AppConnectionState::LISTENING:
+        ui_->m_pLabelPadlock->hide();
+        setStatus(tr("Listening for clients."));
+        break;
+    case AppConnectionState::WAITING_FOR_PEER:
+        ui_->m_pLabelPadlock->hide();
+        setStatus(tr("Waiting for a peer connection."));
+        break;
     case AppConnectionState::CONNECTING:
         ui_->m_pLabelPadlock->hide();
         setStatus(tr("InputLeap is starting."));

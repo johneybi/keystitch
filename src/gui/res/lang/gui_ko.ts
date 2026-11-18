@@ -176,6 +176,22 @@ Visit our website for help and info (symless.com).
 <context>
     <name>MainWindow</name>
     <message>
+        <source>Listening for clients.</source>
+        <translation>다른 컴퓨터의 연결을 기다리는 중입니다.</translation>
+    </message>
+    <message>
+        <source>Waiting for a peer connection.</source>
+        <translation>상대 컴퓨터에 연결되기를 기다리는 중입니다.</translation>
+    </message>
+    <message>
+        <source>Connected to a peer.</source>
+        <translation>상대 컴퓨터와 연결되었습니다.</translation>
+    </message>
+    <message>
+        <source>Engine exited (%1). Retrying in %2 seconds.</source>
+        <translation>엔진이 종료되었습니다(코드 %1). %2초 후 다시 시작합니다.</translation>
+    </message>
+    <message>
         <location filename="src/MainWindow.cpp" line="790"/>
         <source>&amp;Start</source>
         <translation type="finished">시작(&amp;S)</translation>

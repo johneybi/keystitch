@@ -20,6 +20,8 @@
 enum class AppConnectionState {
     DISCONNECTED,
     CONNECTING,
+    LISTENING,
+    WAITING_FOR_PEER,
     CONNECTED,
     TRANSFERRING
 };

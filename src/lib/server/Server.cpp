@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "common/PeerStatus.h"
 #include "server/Server.h"
 
 #include "server/ClientProxy.h"
@@ -2127,6 +2128,10 @@ Server::addClient(BaseClientProxy* client)
 	// add to list
 	m_clientSet.insert(client);
 	m_clients.insert(std::make_pair(name, client));
+    // One entry is the local primary screen.
+    if (client != m_primaryClient && m_clients.size() == 2) {
+        reportPeerStatus(PeerStatus::Connected);
+    }
 
 	// initialize client data
 	std::int32_t x, y;
@@ -2160,6 +2165,9 @@ Server::removeClient(BaseClientProxy* client)
 	update_key_remap_tap_timer();
 	m_clients.erase(name);
 	m_clientSet.erase(i);
+    if (client != m_primaryClient && m_clients.size() == 1) {
+        reportPeerStatus(PeerStatus::Listening);
+    }
 
 	return true;
 }

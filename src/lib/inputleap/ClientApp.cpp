@@ -40,6 +40,7 @@
 #include "base/EventQueue.h"
 #include "base/Log.h"
 #include "common/Version.h"
+#include "common/PeerStatus.h"
 
 #if WINAPI_MSWINDOWS
 #include "platform/MSWindowsScreen.h"
@@ -271,6 +272,7 @@ void ClientApp::cancelClientRestart()
 
 void ClientApp::handle_client_connected()
 {
+    reportPeerStatus(PeerStatus::Connected);
     cancelClientRestart();
     // using CLOG_PRINT here allows the GUI to see that the client is connected
     // regardless of which log level is set
@@ -282,6 +284,7 @@ void ClientApp::handle_client_connected()
 
 void ClientApp::handle_client_failed(const Event& e)
 {
+    reportPeerStatus(PeerStatus::Disconnected);
     const auto& info = e.get_data_as<Client::FailInfo>();
 
     updateStatus(std::string("Failed to connect to server: ") + info.m_what);
@@ -300,6 +303,7 @@ void ClientApp::handle_client_failed(const Event& e)
 
 void ClientApp::handle_client_disconnected()
 {
+    reportPeerStatus(PeerStatus::Disconnected);
     LOG_NOTE("disconnected from server");
     if (!args().m_restartable) {
         m_events->add_event(EventType::QUIT);
@@ -373,6 +377,7 @@ ClientApp::startClient()
             LOG_NOTE("started client");
         }
 
+        reportPeerStatus(PeerStatus::Connecting);
         m_client->connect();
 
         updateStatus();
