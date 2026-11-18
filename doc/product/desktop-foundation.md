@@ -86,8 +86,10 @@ macOS 26.0은 이번 로컬 검증 바이너리의 빌드 대상이며 제품의
 정한 값이 아니다. 기존 API deprecation·중복 라이브러리 경고는 남아 있다.
 
 `.github/workflows/keystitch-product-ci.yml`은 현재 개발 브랜치의 Mac/Windows
-GUI·엔진 빌드와 전체 unit suite를 실행하도록 추가했다. Windows Qt 6.8.3과
-Mac Qt 5로 공통 설정 계층도 검증한다. CI 성공 여부와 실제 입력 수용은 별도다.
+GUI·엔진 빌드와 전체 unit suite를 실행하도록 추가했다. 두 CI 플랫폼에서
+Qt 6.8.3으로 공통 설정 계층을 검증하며, 로컬에서는 Qt 5도 확인했다.
+Mac CI의 실행기는 macOS 26이다. 기존 macos-14 실행기는 지원 종료로 작업이
+시작되지 않아 교체했다. CI 성공 여부와 실제 입력 수용은 별도다.
 이 workflow는 설치 파일을 공개하거나 서비스를 설치하지 않는다.
 
 ## 배포까지 남은 순서

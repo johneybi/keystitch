@@ -254,7 +254,7 @@ ClientApp::scheduleClientRestart(double retryTime)
     LOG_DEBUG("retry in %.0f seconds", retryTime);
     EventQueueTimer* timer = m_events->newOneShotTimer(retryTime, nullptr);
     m_restartTimer = timer;
-    m_retryDelay = std::min(m_retryDelay * 2.0, 30.0);
+    m_retryDelay = (std::min)(m_retryDelay * 2.0, 30.0);
     m_events->add_handler(EventType::TIMER, timer,
                           [this, timer](const Event& event) { handle_client_restart(event, timer); });
 }
