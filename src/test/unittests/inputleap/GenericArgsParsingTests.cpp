@@ -111,7 +111,7 @@ TEST(GenericArgsParsingTests, parseGenericArgs_noDeamonCmd_daemonFalse)
     EXPECT_EQ(a.size(), 0); // all args consumed
 }
 
-TEST(GenericArgsParsingTests, parseGenericArgs_deamonCmd_daemonTrue)
+TEST(GenericArgsParsingTests, parseGenericArgs_daemonCmd_platformContract)
 {
     const int argc = 2;
     const char* kDaemonCmd[argc] = { "stub", "--daemon" };
@@ -121,9 +121,13 @@ TEST(GenericArgsParsingTests, parseGenericArgs_deamonCmd_daemonTrue)
     ArgsBase argsBase;
     argParser.setArgsBase(argsBase);
 
+#if SYSAPI_WIN32
+    EXPECT_THROW(argParser.parseGenericArgs(a), XArgvParserError);
+#else
     argParser.parseGenericArgs(a);
 
     EXPECT_EQ(true, argsBase.m_daemon);
+#endif
     EXPECT_EQ(a.size(), 0); // all args consumed
 }
 

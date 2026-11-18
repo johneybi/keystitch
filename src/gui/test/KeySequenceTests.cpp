@@ -95,7 +95,8 @@ TEST_P(KeySequenceLoadSaveTestFixture, SupportsSpecialSymbols)
     auto filename = getTemporaryFilename();
 
     {
-        QSettings settings(filename, QSettings::NativeFormat);
+        // This fixture is a file, not a Windows registry path.
+        QSettings settings(filename, QSettings::IniFormat);
         KeySequence sequence;
 
         sequence.appendKey(key, 0);
@@ -103,14 +104,17 @@ TEST_P(KeySequenceLoadSaveTestFixture, SupportsSpecialSymbols)
         settings.beginGroup("test");
         sequence.saveSettings(settings);
         settings.endGroup();
+        settings.sync();
+        ASSERT_EQ(QSettings::NoError, settings.status());
     }
     {
-        QSettings settings(filename, QSettings::NativeFormat);
+        QSettings settings(filename, QSettings::IniFormat);
         KeySequence sequence;
 
         settings.beginGroup("test");
         sequence.loadSettings(settings);
         settings.endGroup();
+        ASSERT_EQ(QSettings::NoError, settings.status());
 
         const auto& data = sequence.sequence();
         ASSERT_EQ(data.size(), 2);

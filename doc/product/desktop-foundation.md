@@ -87,10 +87,17 @@ macOS 26.0은 이번 로컬 검증 바이너리의 빌드 대상이며 제품의
 
 `.github/workflows/keystitch-product-ci.yml`은 현재 개발 브랜치의 Mac/Windows
 GUI·엔진 빌드와 전체 unit suite를 실행하도록 추가했다. 두 CI 플랫폼에서
-Qt 6.8.3으로 공통 설정 계층을 검증하며, 로컬에서는 Qt 5도 확인했다.
+Qt 6.10.3으로 공통 설정 계층을 검증하며, 로컬에서는 Qt 5도 확인했다.
 Mac CI의 실행기는 macOS 26이다. 기존 macos-14 실행기는 지원 종료로 작업이
 시작되지 않아 교체했다. CI 성공 여부와 실제 입력 수용은 별도다.
 이 workflow는 설치 파일을 공개하거나 서비스를 설치하지 않는다.
+
+전체 CI를 처음 연결하며 기존 Windows 재접속 코드의 `min` 매크로 충돌도
+수정했다. 기존 GUI 저장 테스트는 임시 파일 경로에 NativeFormat을 사용해
+Windows 레지스트리로 잘못 해석하던 부분을 IniFormat으로 바꾸고 I/O 상태를
+검사한다. `--daemon` 검사는 Windows에서의 명시적 거부를 확인하도록 고쳤다.
+검사를 제외하거나 제품의 저장 형식을 변경하지 않았다. Mac SDK에서 제거된
+AGL을 참조하던 Qt 6.8.3 대신 AGL 의존성이 없는 Qt 6.10.3을 CI에 고정했다.
 
 패키징 보완: [Mac 묶음 검사](../../tools/release/README.md)를 추가했다.
 실제 바이너리/의존성보다 낮은 최소 OS를 선언한 패키지를 거부하고, 서명 후의

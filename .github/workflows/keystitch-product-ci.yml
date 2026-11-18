@@ -30,7 +30,7 @@ jobs:
         run: python3 tools/release/test_audit_macos_bundle.py
       - uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.3'
+          version: '6.10.3'
           cache: true
       - name: Configure
         run: |
@@ -63,7 +63,7 @@ jobs:
           submodules: recursive
       - uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.3'
+          version: '6.10.3'
           cache: true
       - name: Download existing Bonjour build dependency
         id: bonjour

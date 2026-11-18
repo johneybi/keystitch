@@ -167,20 +167,24 @@ void doHotkeyLoadSaveTest(const TestHotKey& test_hotkey)
 
     Hotkey hotkey_before, hotkey_after;
     {
-        QSettings settings(filename, QSettings::NativeFormat);
+        // This fixture is a file, not a Windows registry path.
+        QSettings settings(filename, QSettings::IniFormat);
 
         hotkey_before = createHotkey(test_hotkey);
 
         settings.beginGroup("test");
         hotkey_before.saveSettings(settings);
         settings.endGroup();
+        settings.sync();
+        ASSERT_EQ(QSettings::NoError, settings.status());
     }
     {
-        QSettings settings(filename, QSettings::NativeFormat);
+        QSettings settings(filename, QSettings::IniFormat);
 
         settings.beginGroup("test");
         hotkey_after.loadSettings(settings);
         settings.endGroup();
+        ASSERT_EQ(QSettings::NoError, settings.status());
 
         ASSERT_EQ(hotkey_before.keySequence().sequence(), hotkey_after.keySequence().sequence());
         ASSERT_EQ(hotkey_before.keySequence().modifiers(), hotkey_after.keySequence().modifiers());
