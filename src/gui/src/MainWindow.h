@@ -24,10 +24,8 @@
 #include <QMainWindow>
 #include <QSystemTrayIcon>
 #include <QSettings>
-#include <QProcess>
+#include "desktop/DesktopEngine.h"
 #include <QThread>
-#include <QTimer>
-
 
 
 #include "ServerConfig.h"
@@ -78,13 +76,8 @@ class MainWindow : public QMainWindow
             Info
         };
 
-        enum qRuningState {
-            kStarted,
-            kStopped
-        };
-
     public:
-        MainWindow(QSettings& settings, AppConfig& appConfig);
+        MainWindow(QSettings& settings, AppConfig& appConfig, inputleap::DesktopEngine& engine);
         ~MainWindow() override;
 
     public:
@@ -123,11 +116,8 @@ public slots:
         bool on_m_pActionSave_triggered();
         void on_m_pActionAbout_triggered();
         void on_m_pActionSettings_triggered();
-        void cmd_app_finished(int exitCode, QProcess::ExitStatus);
         void trayActivated(QSystemTrayIcon::ActivationReason reason);
         void stop_cmd_app();
-        void logOutput();
-        void logError();
         void bonjourInstallFinished();
         void showLogWindow();
 
@@ -147,7 +137,6 @@ public slots:
         void updateFromLogLine(const QString& line);
         QString getIPAddresses();
         void stopService();
-        void stopDesktop();
         void changeEvent(QEvent* event) override;
         bool event(QEvent* event) override;
         void retranslateMenuBar();
@@ -170,12 +159,10 @@ public slots:
         std::unique_ptr<Ui::MainWindow> ui_;
         QSettings& m_Settings;
         AppConfig* m_AppConfig;
-        QProcess* cmd_app_process_;
-        QTimer restart_timer_;
-        int restart_delay_ms_ = 1000;
+        inputleap::DesktopEngine& engine_;
         AppConnectionState connection_state_ = AppConnectionState::DISCONNECTED;
         ServerConfig m_ServerConfig;
-        QTemporaryFile* m_pTempConfigFile;
+        std::unique_ptr<QTemporaryFile> m_pTempConfigFile;
         QSystemTrayIcon* m_pTrayIcon;
         QMenu* m_pTrayIconMenu;
         bool m_AlreadyHidden;
@@ -191,8 +178,6 @@ public slots:
         bool m_SuppressAutoConfigWarning;
         CommandProcess* m_BonjourInstall;
         bool m_SuppressEmptyServerWarning;
-        qRuningState m_ExpectedRunningState;
-        QMutex m_StopDesktopMutex;
         SslCertificate* m_pSslCertificate;
         QStringList m_PendingClientNames;
         LogWindow *m_pLogWindow;

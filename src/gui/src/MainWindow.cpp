@@ -111,11 +111,11 @@ static const char* APP_LARGE_ICON = ":/res/icons/256x256/input-leap.png";
 
 } // namespace
 
-MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig) :
+MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig, inputleap::DesktopEngine& engine) :
     ui_{std::make_unique<Ui::MainWindow>()},
     m_Settings(settings),
     m_AppConfig(&appConfig),
-    cmd_app_process_(nullptr),
+    engine_(engine),
     m_ServerConfig(&m_Settings, 5, 3, m_AppConfig->screenName(), this),
     m_pTempConfigFile(nullptr),
     m_pTrayIcon(nullptr),
@@ -131,7 +131,6 @@ MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig) :
     m_SuppressAutoConfigWarning(false),
     m_BonjourInstall(nullptr),
     m_SuppressEmptyServerWarning(false),
-    m_ExpectedRunningState(kStopped),
     m_pSslCertificate(nullptr),
     m_pLogWindow(new LogWindow(nullptr))
 {
@@ -143,11 +142,20 @@ MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig) :
     setAttribute(Qt::WA_X11NetWmWindowTypeDialog, true);
 
     ui_->setupUi(this);
-    restart_timer_.setSingleShot(true);
-    connect(&restart_timer_, &QTimer::timeout, this, [this]() {
-        if (m_ExpectedRunningState == kStarted) {
-            start_cmd_app();
-        }
+    using Engine = inputleap::DesktopEngine;
+    connect(&engine_, &Engine::outputLine, this, &MainWindow::appendLogRaw);
+    connect(&engine_, &Engine::retryScheduled, this, [this](int code, int delayMs) {
+        set_connection_state(AppConnectionState::CONNECTING);
+        setStatus(tr("Engine exited (%1). Retrying in %2 seconds.").arg(code).arg(delayMs / 1000));
+    });
+    connect(&engine_, &Engine::launchFailed, this, [this](const QString& error) {
+        set_connection_state(AppConnectionState::DISCONNECTED);
+        appendLogError(error);
+        show();
+        QMessageBox::warning(this, tr("Program can not be started"), error);
+    });
+    connect(&engine_, &Engine::stateChanged, this, [this](Engine::State state) {
+        if (state == Engine::State::Starting) setStatus(tr("InputLeap is starting."));
     });
     setWindowIcon(QIcon(APP_LARGE_ICON));
     createMenuBar();
@@ -205,11 +213,7 @@ MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig) :
 
 MainWindow::~MainWindow()
 {
-    restart_timer_.stop();
-    if (appConfig().processMode() == Desktop) {
-        m_ExpectedRunningState = kStopped;
-        stopDesktop();
-    }
+    engine_.stop();
 
     saveSettings();
 
@@ -394,33 +398,6 @@ void MainWindow::trayActivated(QSystemTrayIcon::ActivationReason reason)
     }
 }
 
-void MainWindow::logOutput()
-{
-    if (cmd_app_process_)
-    {
-        QString text(cmd_app_process_->readAllStandardOutput());
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-        const auto results = text.split(QRegularExpression("\r|\n|\r\n"));
-#else
-        const auto results = text.split(QRegExp("\r|\n|\r\n"));
-#endif
-        for (const auto& line : results) {
-            if (!line.isEmpty())
-            {
-                appendLogRaw(line);
-            }
-        }
-    }
-}
-
-void MainWindow::logError()
-{
-    if (cmd_app_process_)
-    {
-        appendLogRaw(cmd_app_process_->readAllStandardError());
-    }
-}
-
 void MainWindow::appendLogInfo(const QString& text)
 {
     if (appConfig().logLevel() >= 3) {
@@ -571,22 +548,11 @@ void MainWindow::proofreadInfo()
 
 void MainWindow::start_cmd_app()
 {
-    restart_timer_.stop();
     bool desktopMode = appConfig().processMode() == Desktop;
     bool serviceMode = appConfig().processMode() == Service;
-
-    if (desktopMode && cmd_app_process_ != nullptr) {
-        if (cmd_app_process_->state() != QProcess::NotRunning) {
-            appendLogDebug("desktop process is already running");
-            return;
-        }
-
-        cmd_app_process_->deleteLater();
-        cmd_app_process_ = nullptr;
-    }
+    if (engine_.active()) return;
 
     appendLogDebug("starting process");
-    m_ExpectedRunningState = kStarted;
     set_connection_state(AppConnectionState::CONNECTING);
 
     QString app;
@@ -609,11 +575,7 @@ void MainWindow::start_cmd_app()
 
     args << "--name" << getScreenName();
 
-    if (desktopMode)
-    {
-        cmd_app_process_ = new QProcess(this);
-    }
-    else
+    if (serviceMode)
     {
         // tell client/server to talk to daemon through ipc.
         args << "--ipc";
@@ -661,13 +623,6 @@ void MainWindow::start_cmd_app()
         return;
     }
 
-    if (desktopMode)
-    {
-        connect(cmd_app_process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &MainWindow::cmd_app_finished);
-        connect(cmd_app_process_, &QProcess::readyReadStandardOutput, this, &MainWindow::logOutput);
-        connect(cmd_app_process_, &QProcess::readyReadStandardError, this, &MainWindow::logError);
-    }
-
     m_pLogWindow->startNewInstance();
 
     appendLogInfo("starting " + QString(app_role() == AppRole::Server ? "server" : "client"));
@@ -676,7 +631,6 @@ void MainWindow::start_cmd_app()
 
     appendLogDebug(QString("command: %1 %2").arg(app, args.join(" ")));
 
-    appendLogInfo("config file: " + configFilename());
     appendLogInfo("log level: " + appConfig().logLevelText());
 
     if (appConfig().logToFile())
@@ -684,15 +638,7 @@ void MainWindow::start_cmd_app()
 
     if (desktopMode)
     {
-        cmd_app_process_->start(app, args);
-        if (!cmd_app_process_->waitForStarted())
-        {
-            show();
-            QMessageBox::warning(this, tr("Program can not be started"), QString(tr("The executable<br><br>%1<br><br>could not be successfully started, although it does exist. Please check if you have sufficient permissions to run this program.").arg(app)));
-            return;
-        }
-        appendLogInfo(QString("desktop process started pid=%1")
-                      .arg(cmd_app_process_->processId()));
+        engine_.start(app, args);
     }
 
     if (serviceMode)
@@ -755,7 +701,7 @@ QString MainWindow::configFilename()
     {
         // TODO: no need to use a temporary file, since we need it to
         // be permanent (since it'll be used for Windows services, etc).
-        m_pTempConfigFile = new QTemporaryFile();
+        m_pTempConfigFile = std::make_unique<QTemporaryFile>();
         if (!m_pTempConfigFile->open())
         {
             QMessageBox::critical(this, tr("Cannot write configuration file"),
@@ -764,6 +710,12 @@ QString MainWindow::configFilename()
         }
 
         serverConfig().save(*m_pTempConfigFile);
+        if (!m_pTempConfigFile->flush() || m_pTempConfigFile->error() != QFile::NoError) {
+            QMessageBox::critical(this, tr("Cannot write configuration file"), m_pTempConfigFile->errorString());
+            return "";
+        }
+        // The Windows service can outlive the frontend which supplied this path.
+        if (appConfig().processMode() == Service) m_pTempConfigFile->setAutoRemove(false);
         filename = m_pTempConfigFile->fileName();
 
         m_pTempConfigFile->close();
@@ -830,6 +782,8 @@ bool MainWindow::serverArgs(QStringList& args, QString& app)
     }
 
     QString configFilename = this->configFilename();
+    if (configFilename.isEmpty()) return false;
+    appendLogInfo("config file: " + configFilename);
     args << "-c" << configFilename << "--address" << address();
 
     return true;
@@ -837,29 +791,17 @@ bool MainWindow::serverArgs(QStringList& args, QString& app)
 
 void MainWindow::stop_cmd_app()
 {
-    restart_timer_.stop();
-    restart_delay_ms_ = 1000;
+    engine_.stop();
     appendLogDebug("stopping process");
-
-    m_ExpectedRunningState = kStopped;
 
     if (appConfig().processMode() == Service)
     {
         stopService();
     }
-    else if (appConfig().processMode() == Desktop)
-    {
-        stopDesktop();
-    }
 
     set_connection_state(AppConnectionState::DISCONNECTED);
 
-    // HACK: deleting the object deletes the physical file, which is
-    // bad, since it could be in use by the Windows service!
-#if !defined(Q_OS_WIN)
-    delete m_pTempConfigFile;
-#endif
-    m_pTempConfigFile = nullptr;
+    m_pTempConfigFile.reset();
 
     // reset so that new connects cause auto-hide.
     m_AlreadyHidden = false;
@@ -871,68 +813,10 @@ void MainWindow::stopService()
     m_IpcClient.sendCommand("", appConfig().elevateMode());
 }
 
-void MainWindow::stopDesktop()
-{
-    QMutexLocker locker(&m_StopDesktopMutex);
-    if (!cmd_app_process_) {
-        return;
-    }
-
-    appendLogInfo("stopping InputLeap desktop process");
-
-    // waitForFinished can dispatch finished(); detach before entering it.
-    QProcess* process = cmd_app_process_;
-    cmd_app_process_ = nullptr;
-    disconnect(process, nullptr, this, nullptr);
-    if (process->isOpen()) {
-#if SYSAPI_UNIX
-        process->terminate();
-        process->waitForFinished(5000);
-#endif
-        process->close();
-    }
-
-    delete process;
-}
-
-void MainWindow::cmd_app_finished(int exitCode, QProcess::ExitStatus)
-{
-    auto* finishedProcess = qobject_cast<QProcess*>(sender());
-    if (finishedProcess != cmd_app_process_) {
-        appendLogDebug("ignoring exit from superseded desktop process");
-        if (finishedProcess != nullptr) {
-            finishedProcess->deleteLater();
-        }
-        return;
-    }
-
-    cmd_app_process_ = nullptr;
-    if (finishedProcess != nullptr) {
-        finishedProcess->deleteLater();
-    }
-
-    if (exitCode == 0) {
-        appendLogInfo(QString("process exited normally"));
-    }
-    else {
-        appendLogError(QString("process exited with error code: %1").arg(exitCode));
-    }
-
-    if (m_ExpectedRunningState == kStarted) {
-        restart_timer_.start(restart_delay_ms_);
-        appendLogInfo(QString("process exited; restart scheduled in %1 ms")
-                      .arg(restart_delay_ms_));
-        restart_delay_ms_ = qMin(restart_delay_ms_ * 2, 30000);
-    }
-    else {
-        set_connection_state(AppConnectionState::DISCONNECTED);
-    }
-}
-
 void MainWindow::set_connection_state(AppConnectionState state)
 {
     if (state == AppConnectionState::CONNECTED) {
-        restart_delay_ms_ = 1000;
+        engine_.resetBackoff();
     }
     if (connection_state() == state)
         return;
@@ -940,25 +824,21 @@ void MainWindow::set_connection_state(AppConnectionState state)
     if (state == AppConnectionState::CONNECTED || state == AppConnectionState::CONNECTING)
     {
         disconnect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStartCmdApp, &QAction::trigger);
-        connect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStopCmdApp, &QAction::trigger);
+        connect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStopCmdApp, &QAction::trigger, Qt::UniqueConnection);
         ui_->m_pButtonToggleStart->setText(tr("&Stop"));
         ui_->m_pButtonReload->setEnabled(true);
     }
     else if (state == AppConnectionState::DISCONNECTED)
     {
         disconnect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStopCmdApp, &QAction::trigger);
-        connect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStartCmdApp, &QAction::trigger);
+        connect(ui_->m_pButtonToggleStart, &QPushButton::clicked, ui_->m_pActionStartCmdApp, &QAction::trigger, Qt::UniqueConnection);
         ui_->m_pButtonToggleStart->setText(tr("&Start"));
         ui_->m_pButtonReload->setEnabled(false);
     }
 
-    bool connected = false;
-    if (state == AppConnectionState::CONNECTED || state == AppConnectionState::TRANSFERRING) {
-        connected = true;
-    }
-
-    ui_->m_pActionStartCmdApp->setEnabled(!connected);
-    ui_->m_pActionStopCmdApp->setEnabled(connected);
+    const bool active = state != AppConnectionState::DISCONNECTED;
+    ui_->m_pActionStartCmdApp->setEnabled(!active);
+    ui_->m_pActionStopCmdApp->setEnabled(active);
 
     switch (state)
     {

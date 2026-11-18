@@ -151,7 +151,8 @@ int main(int argc, char* argv[])
 
 	app.switchTranslator(appConfig.language());
 
-	MainWindow mainWindow(settings, appConfig);
+	inputleap::DesktopEngine engine;
+	MainWindow mainWindow(settings, appConfig, engine);
 	SetupWizard setupWizard(mainWindow, true);
 
 	if (appConfig.wizardShouldRun())

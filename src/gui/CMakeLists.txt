@@ -254,7 +254,8 @@ endif()
 if(INPUTLEAP_BUILD_TESTS)
     add_executable(desktopunittests
         test/KeyboardSettingsTests.cpp
-        test/main.cpp
+        test/DesktopEngineTests.cpp
+        test/DesktopTestMain.cpp
     )
     target_link_libraries(desktopunittests desktop_settings ${GTEST_LIBRARIES})
     add_test(NAME desktopunittests COMMAND desktopunittests)
