@@ -10,11 +10,10 @@ import time
 from verify_build import verify
 
 
-def registered_location():
+def registered_location(app_id="{D9785C41-CF76-4DC8-9460-FCA5EF15558A}"):
     import winreg
 
-    key = (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-           r"\{D9785C41-CF76-4DC8-9460-FCA5EF15558A}_is1")
+    key = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{app_id}_is1"
     try:
         entry = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key, 0,
                                winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
@@ -109,23 +108,35 @@ def check_legacy_settings(target, evidence):
     print("Installed GUI opened the wizard and imported Barrier settings", flush=True)
 
 
-def main(candidate, evidence):
+def require_hosted_windows():
     if sys.platform != "win32" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise ValueError("Requires a disposable GitHub-hosted Windows runner")
-    revision = os.environ["GITHUB_SHA"]
-    target = Path(os.environ["RUNNER_TEMP"]) / "KeyStitch install test"
-    if target.exists() or registered_location() is not None or listener_rule_count() != 0:
-        raise ValueError("Expected a fresh machine and an unused install location")
-    evidence.mkdir(parents=True, exist_ok=True)
+
+
+def read_candidate(candidate):
     installer, = candidate.rglob("*.exe")
     checksum, = candidate.rglob("windows-SHA256SUMS")
     receipt, = candidate.rglob("windows-build.json")
     digest, filename = checksum.read_text(encoding="utf-8-sig").strip().split(maxsplit=1)
     if filename != installer.name or hashlib.sha256(installer.read_bytes()).hexdigest() != digest:
         raise ValueError("Installer does not match the candidate checksum")
-    staged = json.loads(receipt.read_text(encoding="utf-8"))
+    return installer, json.loads(receipt.read_text(encoding="utf-8"))
+
+
+def remove_developer_path():
     os.environ["PATH"] = os.pathsep.join([str(Path(os.environ["SystemRoot"]) / "System32"),
                                          os.environ["SystemRoot"]])
+
+
+def main(candidate, evidence):
+    require_hosted_windows()
+    revision = os.environ["GITHUB_SHA"]
+    target = Path(os.environ["RUNNER_TEMP"]) / "KeyStitch install test"
+    if target.exists() or registered_location() is not None or listener_rule_count() != 0:
+        raise ValueError("Expected a fresh machine and an unused install location")
+    evidence.mkdir(parents=True, exist_ok=True)
+    installer, staged = read_candidate(candidate)
+    remove_developer_path()
     for phase in ("install", "reinstall"):
         run_installer(installer, evidence / f"{phase}.log", "/SP-", "/NOCLOSEAPPLICATIONS",
                       "/RESTARTEXITCODE=42", f"/DIR={target}")

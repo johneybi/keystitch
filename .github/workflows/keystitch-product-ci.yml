@@ -174,3 +174,23 @@ jobs:
           name: product-windows-install-evidence
           path: install-evidence/
           if-no-files-found: warn
+
+  windows-upgrade:
+    needs: windows
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: keystitch-windows-candidate-${{ github.sha }}
+          path: candidate
+      - name: Exercise the v0.1.0 to candidate transition
+        run: python tools/release/test_windows_upgrade.py candidate upgrade-evidence
+      - name: Upload upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-windows-upgrade-evidence
+          path: upgrade-evidence/
+          if-no-files-found: warn
