@@ -62,8 +62,8 @@ GUI Mac 패키징은 복사 직후와 최종 서명 직후에 이 검사를 실�
 
 ## CI 내부 후보 파일
 
-product workflow는 테스트 후 다음 산출물을 만든다. GitHub Release를 발행하거나
-설치 프로그램을 실행하지 않으며 사용자 컴퓨터의 앱을 교체하지 않는다.
+product workflow는 테스트 후 다음 내부 후보를 만든다. Windows 설치 검사는
+빌드와 별개의 일회용 GitHub 호스팅 Windows Server 2022 VM에서 실행한다.
 
 - Mac: 동일 빌드 3개 실행 파일을 포함한 앱 ZIP, Mach-O audit, build receipt,
   ZIP SHA256. macOS 26 / Qt 6.10.3, 기존 ad-hoc 서명이며 notarization 없음.
@@ -71,6 +71,13 @@ product workflow는 테스트 후 다음 산출물을 만든다. GitHub Release�
   CMake staging에 Qt와 MSVC runtime을 포함하고 개발용 PATH 없이 build probe 실행.
   Inno 컴파일 시 주요 MSVC DLL과 Qt platform plugin 누락을 거부한다.
   오래된 VC2017 런타임 HTTP 다운로드는 제거했다. 설치 파일은 아직 서명하지 않는다.
+
+Windows 설치 작업은 업로드한 EXE의 SHA256을 확인한 다음 설치, 같은 버전 재설치,
+제거를 수행한다. 두 번의 설치에서 Windows 앱 제거 목록의 경로와 네 실행 파일의
+빌드 정보·SHA256을 staging 기록과 대조한다. 제거 후 설치 디렉터리와 제품 등록이
+사라졌는지 확인한다. 단계별 Inno 로그와 검사 기록은
+`product-windows-install-evidence`에 보관한다. 일반 사용자용 Windows 버전,
+이전 제품 버전에서의 업그레이드, GUI 초기화 및 실제 입력은 별도 검증 대상이다.
 
 Windows app-local runtime은 CMake의 `InstallRequiredSystemLibraries`로 모은다.
 [Microsoft 배포 방식](https://learn.microsoft.com/en-us/cpp/windows/choosing-a-deployment-method)

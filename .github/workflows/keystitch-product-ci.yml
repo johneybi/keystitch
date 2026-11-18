@@ -154,3 +154,23 @@ jobs:
           name: product-windows-test-evidence
           path: build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
+
+  windows-install:
+    needs: windows
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: keystitch-windows-candidate-${{ github.sha }}
+          path: candidate
+      - name: Install, reinstall and uninstall the packaged candidate
+        run: python tools/release/test_windows_installer.py candidate install-evidence
+      - name: Upload installation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-windows-install-evidence
+          path: install-evidence/
+          if-no-files-found: warn
