@@ -26,6 +26,8 @@ jobs:
           submodules: recursive
       - name: Install build dependencies
         run: brew install ninja openssl@3
+      - name: Test package audit policy
+        run: python3 tools/release/test_audit_macos_bundle.py
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
@@ -72,6 +74,8 @@ jobs:
           Invoke-WebRequest 'https://github.com/nelsonjchen/mDNSResponder/releases/download/v2019.05.08.1/x64_RelWithDebInfo.zip' -OutFile deps/BonjourSDKLike.zip
           Expand-Archive deps/BonjourSDKLike.zip -DestinationPath deps/BonjourSDKLike
           "path=$env:GITHUB_WORKSPACE\deps\BonjourSDKLike" >> $env:GITHUB_OUTPUT
+      - name: Test package audit policy
+        run: python tools/release/test_audit_macos_bundle.py
       - name: Configure
         shell: pwsh
         env:

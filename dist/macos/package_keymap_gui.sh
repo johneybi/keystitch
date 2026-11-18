@@ -15,8 +15,10 @@ contents="$app/Contents"
 bundle_id="com.johneybi.input-leap-keymap.client"
 version="${INPUTLEAP_KEYMAP_VERSION:-3.0.3}"
 minimum_macos="${INPUTLEAP_MINIMUM_MACOS:-11.0}"
-source_revision="$(git rev-parse HEAD)"
 macdeployqt="${MACDEPLOYQT:-}"
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+packaging_revision="$(git -C "$script_dir/../.." rev-parse HEAD)"
+python="${PYTHON:-python3}"
 
 if [ -z "$macdeployqt" ]; then
     macdeployqt="$(command -v macdeployqt || true)"
@@ -26,7 +28,10 @@ if [ -z "$macdeployqt" ]; then
     exit 1
 fi
 
-rm -rf "$app"
+if [ -e "$app" ] || [ -L "$app" ]; then
+    echo "Refusing to replace an existing app; choose a new staging path: $app" >&2
+    exit 1
+fi
 mkdir -p "$contents/MacOS" "$contents/Resources"
 cp "$gui" "$contents/MacOS/input-leap"
 cp "$client" "$contents/MacOS/input-leapc"
@@ -64,8 +69,8 @@ cat > "$contents/Info.plist" <<EOF
     <string>$version</string>
     <key>LSMinimumSystemVersion</key>
     <string>$minimum_macos</string>
-    <key>KeyStitchSourceRevision</key>
-    <string>$source_revision</string>
+    <key>KeyStitchPackagingCheckoutRevision</key>
+    <string>$packaging_revision</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
@@ -80,6 +85,10 @@ EOF
     -executable="$contents/MacOS/input-leapc" \
     -executable="$contents/MacOS/input-leaps"
 
+# Do not sign a package whose declared minimum OS is lower than any bundled
+# executable/framework, or which still depends on a build machine path.
+"$python" "$script_dir/../../tools/release/audit_macos_bundle.py" "$app"
+
 # Keep Accessibility permission associated with the app across ad-hoc beta
 # updates instead of allowing codesign to use the changing binary cdhash.
 codesign --force --deep --sign - \
@@ -88,3 +97,7 @@ codesign --force --deep --sign - \
     "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 codesign -d -r- "$app" 2>&1 | grep -F "identifier \"$bundle_id\"" >/dev/null
+
+# Signing changes Mach-O bytes; record final hashes only after signing.
+"$python" "$script_dir/../../tools/release/audit_macos_bundle.py" "$app" \
+    --manifest "$app.audit.json"
