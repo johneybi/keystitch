@@ -78,7 +78,13 @@ Windows 설치 작업은 업로드한 EXE의 SHA256을 확인한 다음 설치, 
 설치 전 0개, 최초 설치·재설치 직후 1개, 제거 후 0개인지 확인한다.
 제거 후 설치 디렉터리와 제품 등록이 사라졌는지 확인한다. 단계별 Inno 로그와 검사 기록은
 `product-windows-install-evidence`에 보관한다. 일반 사용자용 Windows 버전,
-이전 제품 버전에서의 업그레이드, GUI 초기화 및 실제 입력은 별도 검증 대상이다.
+이전판 설치 프로그램에서의 업그레이드 및 실제 입력은 별도 검증 대상이다.
+
+최초 설치 검사에서는 이전 Barrier GUI와 같은 위치에 샘플 설정을 넣고, 설치한
+실행 파일을 열어 초기 설정 화면과 복사된 설정을 확인한다. 원본 값도 다시
+대조한다. 앱은 현재 계정의 Input Leap 설정이 비어 있을 때 이전 설정을 가져온다.
+복사가 중단되면 다음 실행에서 남은 항목을 채운다. 외부 설정 파일은
+기존 경로를 참조하므로, 새 버전에서 사용하려면 해당 파일이 그 경로에 있어야 한다.
 
 Windows app-local runtime은 CMake의 `InstallRequiredSystemLibraries`로 모은다.
 [Microsoft 배포 방식](https://learn.microsoft.com/en-us/cpp/windows/choosing-a-deployment-method)

@@ -254,6 +254,7 @@ endif()
 if(INPUTLEAP_BUILD_TESTS)
     add_executable(desktopunittests
         test/KeyboardSettingsTests.cpp
+        test/LegacySettingsTests.cpp
         test/DesktopEngineTests.cpp
         test/DesktopTestMain.cpp
     )

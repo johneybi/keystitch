@@ -24,6 +24,7 @@
 #include "AppConfig.h"
 #include "SetupWizard.h"
 #include "common/BuildInfo.h"
+#include "desktop/LegacySettings.h"
 
 #include <QtCore>
 #include <QtGui>
@@ -53,12 +54,18 @@ int waitForTray();
 bool checkMacAssistiveDevices();
 #endif
 
-void copy_qsettings(const QSettings &src, QSettings &dst)
+static QString importPreviousSettings()
 {
-    const auto keys = src.allKeys();
-    for (const auto& key : keys) {
-        dst.setValue(key, src.value(key));
-    }
+    QSettings destination;
+    QSettings previous("Debauchee", "Barrier");
+    QList<QSettings*> sources{&previous};
+#if defined(Q_OS_MAC)
+    // The old GUI created default QSettings with this organization domain on macOS.
+    QSettings previousDomain("github.com", "Barrier");
+    sources.prepend(&previousDomain);
+#endif
+    return inputleap::importLegacySettings(destination, sources,
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
 }
 
 int main(int argc, char* argv[])
@@ -133,13 +140,12 @@ int main(int argc, char* argv[])
 
 	QApplication::setQuitOnLastWindowClosed(false);
 
-	QSettings settings;
-    if (settings.allKeys().empty()) {
-        // if there are no settings, attempt to copy from old Barrier settings location
-        QSettings fallback_settings{"Debauchee", "Barrier"};
-        copy_qsettings(fallback_settings, settings);
+    const QString importError = importPreviousSettings();
+    if (!importError.isEmpty()) {
+        QMessageBox::critical(nullptr, QObject::tr("Settings migration"), importError);
+        return 1;
     }
-
+    QSettings settings;
 	AppConfig appConfig (&settings);
 
 	if (appConfig.getAutoHide() && !trayAvailable)

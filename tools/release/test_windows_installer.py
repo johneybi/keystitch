@@ -29,14 +29,84 @@ def run_installer(executable, log, *options):
                     f"/LOG={log}", *options], check=True, timeout=180)
 
 
-def listener_rule_count():
+def run_powershell(command):
     powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    command = ("$ErrorActionPreference = 'Stop'\n"
-               "@(Get-NetFirewallRule -PolicyStore PersistentStore | "
-               "Where-Object DisplayName -eq 'Input Leap Keymap Listener').Count")
+    command = "$ErrorActionPreference = 'Stop'\n" + command
     result = subprocess.run([str(powershell), "-NoProfile", "-NonInteractive", "-Command", command],
                             check=True, capture_output=True, text=True, timeout=60)
-    return int(result.stdout.strip())
+    return result.stdout.strip()
+
+
+def listener_rule_count():
+    return int(run_powershell(
+        "@(Get-NetFirewallRule -PolicyStore PersistentStore | "
+        "Where-Object DisplayName -eq 'Input Leap Keymap Listener').Count"
+    ))
+
+
+def check_legacy_settings(target, evidence):
+    import winreg
+
+    legacy = r"Software\Debauchee\Barrier"
+    current = r"Software\InputLeap\InputLeap"
+    for path in (legacy, current):
+        try:
+            entry = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path)
+        except FileNotFoundError:
+            continue
+        entry.Close()
+        raise ValueError(f"Expected an unused test profile at HKCU\\{path}")
+
+    # The wizard exercises Qt's native platform plugin and GUI entry point.
+    # The fixture leaves input sharing stopped and disables certificate creation.
+    preferences = {
+        "": {"serverHostname": "peer.example.invalid", "useExternalConfig": "true",
+             "configFile": str(target.parent / "기존 KeyStitch.conf"),
+             "language": "en", "wizardLastRun": "0", "autoStart": "false", "cryptoEnabled": "false"},
+        r"internalConfig\keyRemaps": {"size": "1"},
+        r"internalConfig\keyRemaps\1": {"screen": "TestMac", "source": "Alt_R", "output": "F19"},
+    }
+    for subkey, values in preferences.items():
+        path = legacy + ("\\" + subkey if subkey else "")
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, path) as entry:
+            for name, value in values.items():
+                winreg.SetValueEx(entry, name, 0, winreg.REG_SZ, value)
+
+    with subprocess.Popen([str(target / "input-leap.exe")], cwd=target) as process:
+        try:
+            title = run_powershell(
+                f"$app = Get-Process -Id {process.pid}\n"
+                "$deadline = [DateTime]::UtcNow.AddSeconds(40)\n"
+                "do {\n"
+                "  $app.Refresh()\n"
+                "  if ($app.HasExited) { throw 'Application exited before setup' }\n"
+                "  if ($app.MainWindowTitle -eq 'Setup InputLeap') { $app.MainWindowTitle; exit }\n"
+                "  Start-Sleep -Milliseconds 500\n"
+                "} while ([DateTime]::UtcNow -lt $deadline)\n"
+                "throw ('Setup window did not appear. Last title: ' + $app.MainWindowTitle)"
+            )
+        except subprocess.CalledProcessError as error:
+            raise ValueError(f"Installed GUI startup failed: {error.stderr.strip()}") from error
+        finally:
+            if process.poll() is None:
+                process.kill()
+    if title != "Setup InputLeap":
+        raise ValueError("Installed GUI did not open the setup wizard")
+
+    for root in (legacy, current):
+        for subkey, values in preferences.items():
+            path = root + ("\\" + subkey if subkey else "")
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as entry:
+                for name, expected in values.items():
+                    actual, _ = winreg.QueryValueEx(entry, name)
+                    if actual != expected:
+                        raise ValueError(f"Unexpected value for {path}\\{name}")
+
+    (evidence / "settings-import.txt").write_text(
+        "Installed GUI opened the setup wizard. Source and copied registry values match.\n",
+        encoding="utf-8"
+    )
+    print("Installed GUI opened the wizard and imported Barrier settings", flush=True)
 
 
 def main(candidate, evidence):
@@ -68,6 +138,8 @@ def main(candidate, evidence):
             raise ValueError(f"{phase}: installed executables differ from staged executables")
         (evidence / f"{phase}-build.json").write_text(json.dumps(installed, indent=2), encoding="utf-8")
         print(f"{phase}: confirmed registration and all four installed binaries", flush=True)
+        if phase == "install":
+            check_legacy_settings(target, evidence)
 
     uninstaller, = target.glob("unins*.exe")
     run_installer(uninstaller, evidence / "uninstall.log")
