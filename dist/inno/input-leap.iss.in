@@ -54,6 +54,8 @@ Source: "@CMAKE_INSTALL_PREFIX@/*"; DestDir: "{app}"; Flags: ignoreversion recur
 [Registry]
 ; Prevent an obsolete Barrier wrapper from starting a second server beside this GUI.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Barrier Keymap"
+; The migration writes the value only after validating the public install.
+Root: HKLM64; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "KeyStitch"; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{commonprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -68,3 +70,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallRun]
 Filename: {sys}\netsh.exe; Parameters: "advfirewall firewall delete rule name=""{#MyAppListenerDesc}"""; Flags: runhidden; RunOnceId: "RemoveInputLeapKeymapListener"
+
+[Code]
+#include "scripts\migrate-startup.iss"

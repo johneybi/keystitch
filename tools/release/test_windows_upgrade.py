@@ -117,6 +117,15 @@ def main(candidate, evidence):
     (evidence / "startup-after-install.json").write_text(json.dumps(after, indent=2), encoding="utf-8")
     if registered_location() != target or verify(target, os.environ["GITHUB_SHA"], "Windows") != staged:
         raise ValueError("The expected candidate is not installed")
+    legacy_service, = [service for service in after["services"] if service["Name"] == "Barrier"]
+    if legacy_service["StartMode"] != "Disabled" or legacy_service["State"] != "Stopped":
+        raise ValueError("The old automatic service was not retired")
+    run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, run_key, 0,
+                       winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as entry:
+        startup_command, _ = winreg.QueryValueEx(entry, "KeyStitch")
+    if startup_command != f'"{target / "input-leap.exe"}"':
+        raise ValueError("The login command does not point to the new installed application")
     print(f"After candidate installation, public application is registered at {registered_location(PUBLIC_APP_ID)}",
           flush=True)
 
@@ -139,6 +148,7 @@ def main(candidate, evidence):
         "publicInstallStillRegistered": registered_location(PUBLIC_APP_ID) == old,
         "copiedSettingNames": sorted(preferences),
         "externalConfigUnchanged": True,
+        "registeredSignInCommand": startup_command,
         "automaticSharingOnGuiLaunch": {"port": PORT, "address": "127.0.0.1", "process": engine},
         "startupAfterGuiLaunch": after_launch,
     }
