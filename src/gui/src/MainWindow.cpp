@@ -1107,7 +1107,7 @@ void MainWindow::on_m_pActionAbout_triggered()
 
 void MainWindow::on_m_pActionSettings_triggered()
 {
-    auto dialog = std::make_unique<SettingsDialog>(this, appConfig());
+    auto dialog = std::make_unique<SettingsDialog>(this, appConfig(), engine_);
     connect(dialog.get(), &SettingsDialog::requestLanguageChange, this, &MainWindow::requestLanguageChange);
     if (dialog.get()->exec() == QDialog::Accepted)
         updateSSLFingerprint();

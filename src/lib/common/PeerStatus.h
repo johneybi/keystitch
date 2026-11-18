@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include "base/MacInputSourceBackend.h"
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -20,16 +21,26 @@ inline constexpr std::array<PeerStatusRecord, 5> peerStatusRecords{{
     {PeerStatus::Disconnected, "disconnected"}
 }};
 
-inline void reportPeerStatus(PeerStatus status)
+inline void writeEngineStatus(const char* field, const char* value)
 {
     const char* tag = std::getenv(peerStatusEnv);
     if (!tag) return;
     const std::string_view id(tag);
     if (id.size() != 32 || id.find_first_not_of("0123456789abcdef") != id.npos) return;
+    std::fprintf(stdout, "%s%s %s%s\n", peerStatusPrefix, tag, field, value);
+    std::fflush(stdout);
+}
+
+inline void reportMacInputSourceBackend(std::optional<MacInputSourceBackend> backend)
+{
+    writeEngineStatus("ime ", backend ? macInputSourceBackendName(*backend) : "inactive");
+}
+
+inline void reportPeerStatus(PeerStatus status)
+{
     for (const auto& record : peerStatusRecords) {
         if (record.state == status) {
-            std::fprintf(stdout, "%s%s %s\n", peerStatusPrefix, tag, record.name);
-            std::fflush(stdout);
+            writeEngineStatus("", record.name);
             return;
         }
     }

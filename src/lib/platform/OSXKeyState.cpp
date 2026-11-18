@@ -16,6 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "common/PeerStatus.h"
 #include "platform/OSXKeyState.h"
 #include "platform/OSXInputSourceSelection.h"
 #include "platform/OSXUchrKeyResource.h"
@@ -238,6 +239,7 @@ OSXKeyState::OSXKeyState(IEventQueue* events, inputleap::KeyMap& keyMap) :
 
 OSXKeyState::~OSXKeyState()
 {
+    reportMacInputSourceBackend(std::nullopt);
     stopNativeSwitchPoll();
 }
 
@@ -259,6 +261,7 @@ OSXKeyState::init(std::optional<MacInputSourceBackend> backend)
         m_virtualKeyMap[s_controlKeys[i].m_virtualKey] =
             s_controlKeys[i].m_keyID;
     }
+    reportMacInputSourceBackend(m_inputSourceBackend);
 }
 
 KeyModifierMask OSXKeyState::mapModifiersFromOSX(std::uint32_t mask) const

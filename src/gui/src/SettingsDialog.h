@@ -23,6 +23,7 @@
 #include <memory>
 
 class AppConfig;
+namespace inputleap { class DesktopEngine; }
 
 namespace Ui
 {
@@ -34,7 +35,7 @@ class SettingsDialog : public QDialog
     Q_OBJECT
 
     public:
-        SettingsDialog(QWidget* parent, AppConfig& config);
+        SettingsDialog(QWidget* parent, AppConfig& config, const inputleap::DesktopEngine& engine);
         ~SettingsDialog() override;
 
     Q_SIGNALS:
@@ -49,7 +50,9 @@ class SettingsDialog : public QDialog
         void languageChanged(int index);
         void logToFileChanged(int i);
         void browseLogClicked();
+        void refreshInputSourceStatus();
 
         std::unique_ptr<Ui::SettingsDialog> ui_;
         AppConfig& app_config_;
+        const inputleap::DesktopEngine& engine_;
 };

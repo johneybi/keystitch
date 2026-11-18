@@ -1061,6 +1061,50 @@ Double click on a screen to edit its settings.</source>
 <context>
     <name>SettingsDialog</name>
     <message>
+        <source>Switch method at next start:</source>
+        <translation>다음 시작 시 한영 전환 방식:</translation>
+    </message>
+    <message>
+        <source>Current switch method:</source>
+        <translation>현재 한영 전환 방식:</translation>
+    </message>
+    <message>
+        <source>Existing macOS shortcut</source>
+        <translation>macOS에 설정된 단축키</translation>
+    </message>
+    <message>
+        <source>Direct input source selection</source>
+        <translation>입력 소스 직접 선택</translation>
+    </message>
+    <message>
+        <source>Unsupported method</source>
+        <translation>지원하지 않는 전환 방식</translation>
+    </message>
+    <message>
+        <source>Sharing is stopped</source>
+        <translation>입력 공유가 중지됨</translation>
+    </message>
+    <message>
+        <source>Waiting to restart</source>
+        <translation>재시작 대기 중</translation>
+    </message>
+    <message>
+        <source>Waiting for the engine</source>
+        <translation>엔진 확인 대기 중</translation>
+    </message>
+    <message>
+        <source>Use existing macOS shortcut (recommended)</source>
+        <translation>macOS에 설정된 단축키 사용 (권장)</translation>
+    </message>
+    <message>
+        <source>Select input source directly (legacy)</source>
+        <translation>입력 소스 직접 선택 (기존 방식)</translation>
+    </message>
+    <message>
+        <source>Used when this Mac receives an input source switch key. Keeps your macOS shortcut and built-in keyboard settings. To apply a saved change now, stop and start sharing.</source>
+        <translation>이 Mac이 한영 전환 키를 받을 때 사용할 방식입니다. 저장한 변경을 지금 적용하려면 입력 공유를 중지한 뒤 다시 시작하세요.</translation>
+    </message>
+    <message>
         <location filename="src/SettingsDialog.cpp" line="131"/>
         <source>Save log file to...</source>
         <translation type="finished">로그 파일 저장하기...</translation>

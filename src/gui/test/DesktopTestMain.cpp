@@ -9,6 +9,12 @@ int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (args.size() == 5 && args[1] == "--fixture-ime" && args[3] == "--macos-ime-backend") {
+        const auto backend = inputleap::parseMacInputSourceBackend(args[4].toStdString());
+        inputleap::reportMacInputSourceBackend(backend);
+        if (args[2] == "exit") QTimer::singleShot(50, &app, &QCoreApplication::quit);
+        return app.exec();
+    }
     if (args.size() == 3 && args[1] == "--fixture") {
         if (args[2] == "peer-events") {
             using namespace inputleap;

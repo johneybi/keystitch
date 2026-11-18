@@ -28,7 +28,10 @@ void DesktopEngine::setState(State next)
 {
     if (state_ == next) return;
     state_ = next;
-    if (next != State::Running) setPeerStatus(PeerStatus::Unknown);
+    if (next != State::Running) {
+        setConfirmedBackend({});
+        if (state_ == next) setPeerStatus(PeerStatus::Unknown);
+    }
     if (state_ == next) Q_EMIT stateChanged(next);
 }
 
@@ -54,6 +57,33 @@ void DesktopEngine::resetBackoff()
     delayMs_ = 1000;
 }
 
+void DesktopEngine::setConfirmedBackend(const QString& backend)
+{
+    if (confirmedBackend_ == backend) return;
+    confirmedBackend_ = backend;
+    Q_EMIT macInputSourceBackendChanged();
+}
+
+void DesktopEngine::consumeStatus(const QByteArray& value)
+{
+    if (value.startsWith("ime ")) {
+        const auto name = value.mid(4);
+        if (name == "inactive") {
+            setConfirmedBackend({});
+        } else {
+            const auto backend = parseMacInputSourceBackend(name.toStdString());
+            setConfirmedBackend(QString::fromLatin1(macInputSourceBackendName(backend)));
+        }
+        return;
+    }
+    for (const auto& record : peerStatusRecords) {
+        if (value == record.name) {
+            setPeerStatus(record.state);
+            return;
+        }
+    }
+}
+
 void DesktopEngine::drain(QProcess* child, bool standardError, bool atEnd)
 {
     if (child != child_) return;
@@ -67,13 +97,7 @@ void DesktopEngine::drain(QProcess* child, bool standardError, bool atEnd)
         tail.remove(0, newline < 0 ? length : length + 1);
         if (bytes.endsWith('\r')) bytes.chop(1);
         if (!standardError && newline >= 0 && bytes.startsWith(statusPrefix_)) {
-            const auto value = bytes.mid(statusPrefix_.size());
-            for (const auto& record : peerStatusRecords) {
-                if (value == record.name) {
-                    setPeerStatus(record.state);
-                    break;
-                }
-            }
+            consumeStatus(bytes.mid(statusPrefix_.size()));
             continue;
         }
         Q_EMIT outputLine(QString::fromUtf8(bytes));

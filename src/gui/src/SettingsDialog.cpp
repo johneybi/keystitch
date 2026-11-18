@@ -25,15 +25,16 @@
 #include "AppConfig.h"
 
 #include <QtCore>
+#include "desktop/DesktopEngine.h"
 #include <QtGui>
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QDir>
 
-SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config) :
+SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config, const inputleap::DesktopEngine& engine) :
     QDialog(parent, Qt::WindowTitleHint | Qt::WindowSystemMenuHint),
     ui_{std::make_unique<Ui::SettingsDialog>()},
-    app_config_(config)
+    app_config_(config), engine_(engine)
 {
     ui_->setupUi(this);
 
@@ -67,7 +68,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config) :
     } else {
         setIndexFromItemData(ui_->m_pComboInputSource, keyboard.macInputSourceBackend);
     }
+    connect(&engine_, &inputleap::DesktopEngine::macInputSourceBackendChanged,
+            this, &SettingsDialog::refreshInputSourceStatus);
+    connect(&engine_, &inputleap::DesktopEngine::stateChanged,
+            this, &SettingsDialog::refreshInputSourceStatus);
+    refreshInputSourceStatus();
 #else
+    ui_->labelCurrentInputSource->hide();
+    ui_->currentInputSource->hide();
     ui_->m_pLabelInputSource->hide();
     ui_->m_pComboInputSource->hide();
 #endif
@@ -83,6 +91,26 @@ SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config) :
     connect(ui_->m_pCheckBoxLogToFile, &QCheckBox::stateChanged, this, &SettingsDialog::logToFileChanged);
     connect(ui_->m_pButtonBrowseLog, &QPushButton::clicked, this, &SettingsDialog::browseLogClicked);
     connect(ui_->m_pComboLanguage, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SettingsDialog::languageChanged);
+}
+
+void SettingsDialog::refreshInputSourceStatus()
+{
+    const auto method = engine_.confirmedMacInputSourceBackend();
+    QString text;
+    if (method == "native-shortcut") {
+        text = tr("Existing macOS shortcut");
+    } else if (method == "direct-tis") {
+        text = tr("Direct input source selection");
+    } else if (!method.isEmpty()) {
+        text = tr("Unsupported method");
+    } else if (!engine_.active()) {
+        text = tr("Sharing is stopped");
+    } else if (engine_.state() == inputleap::DesktopEngine::State::Retrying) {
+        text = tr("Waiting to restart");
+    } else {
+        text = tr("Waiting for the engine");
+    }
+    ui_->currentInputSource->setText(text);
 }
 
 void SettingsDialog::accept()
@@ -135,6 +163,11 @@ void SettingsDialog::changeEvent(QEvent* event)
                 ui_->m_pComboLanguage->blockSignals(false);
 
                 ui_->m_pComboLogLevel->setCurrentIndex(logLevelIndex);
+#if defined(Q_OS_MAC)
+                ui_->m_pComboInputSource->setItemText(0, tr("Use existing macOS shortcut (recommended)"));
+                ui_->m_pComboInputSource->setItemText(1, tr("Select input source directly (legacy)"));
+                refreshInputSourceStatus();
+#endif
                 break;
             }
 

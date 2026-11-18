@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "desktop/DesktopEngine.h"
+#include "desktop/KeyboardSettings.h"
+#include <QSettings>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QThread>
@@ -83,4 +85,35 @@ TEST(DesktopEngineTests, OnlyCompleteCurrentChildStatusRecordsChangePeerState)
     EXPECT_EQ(PeerStatus::Unknown, engine.peerStatus());
     engine.stop();
 }
+TEST(DesktopEngineTests, ConfirmedMethodTracksChildAcrossSaveRetryAndManualRestart)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    QSettings file(dir.filePath("settings.ini"), QSettings::IniFormat);
+    KeyboardSettings store(file);
+    DesktopEngine engine;
+    QStringList reports;
+    QObject::connect(&engine, &DesktopEngine::macInputSourceBackendChanged, [&] {
+        reports << engine.confirmedMacInputSourceBackend();
+    });
+    QString error;
+    QStringList first{"--fixture-ime", "exit"};
+    ASSERT_TRUE(store.appendLaunchArguments(DesktopPlatform::MacOS, first, error));
+    const auto program = QCoreApplication::applicationFilePath();
+    engine.start(program, first);
+    ASSERT_TRUE(waitUntil([&] { return reports.contains("native-shortcut"); }));
+    ASSERT_TRUE(store.saveMacInputSourceBackend("direct-tis", error));
+    ASSERT_TRUE(waitUntil([&] { return reports.count("native-shortcut") == 2; }));
+    engine.stop();
+    EXPECT_TRUE(engine.confirmedMacInputSourceBackend().isEmpty());
+    EXPECT_FALSE(reports.contains("direct-tis"));
+
+    QStringList next{"--fixture-ime", "hold"};
+    ASSERT_TRUE(store.appendLaunchArguments(DesktopPlatform::MacOS, next, error));
+    engine.start(program, next);
+    ASSERT_TRUE(waitUntil([&] { return engine.confirmedMacInputSourceBackend() == "direct-tis"; }));
+    engine.stop();
+    EXPECT_TRUE(engine.confirmedMacInputSourceBackend().isEmpty());
+}
+
 } // namespace inputleap
