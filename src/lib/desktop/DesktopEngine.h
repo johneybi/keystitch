@@ -31,12 +31,14 @@ Q_SIGNALS:
 
 private:
     void launch();
-    void drain(QProcess* child, bool atEnd);
+    void drain(QProcess* child, bool standardError, bool atEnd);
     void setState(State next);
     State state_ = State::Stopped;
     QProcess* child_ = nullptr;
     QTimer retry_;
     int delayMs_ = 1000;
+    QByteArray stdoutTail_;
+    QByteArray stderrTail_;
     QString program_;
     QStringList arguments_;
 };

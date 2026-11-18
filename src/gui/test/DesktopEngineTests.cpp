@@ -43,7 +43,11 @@ TEST(DesktopEngineTests, RetryUsesOriginalArgumentsAndStopCancelsPendingLaunch)
     ASSERT_TRUE(waitUntil([&] { return delays.size() == 1; }));
     engine.start(program, {"--fixture", "hold"});
     ASSERT_TRUE(waitUntil([&] { return delays.size() == 2; }));
-    EXPECT_EQ((QStringList{"connected", "last line", "connected", "last line"}), lines);
+    // The relative order of the two OS pipes is unspecified.
+    EXPECT_EQ(6, lines.size());
+    EXPECT_EQ(2, lines.count("diagnostic"));
+    EXPECT_EQ(2, lines.count("connected"));
+    EXPECT_EQ(2, lines.count("last line"));
     EXPECT_EQ((QList<int>{1000, 2000}), delays);
     engine.stop();
     EXPECT_FALSE(waitUntil([&] { return starts > 2; }, 2200));

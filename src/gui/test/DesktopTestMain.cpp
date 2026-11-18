@@ -11,6 +11,8 @@ int main(int argc, char** argv)
     if (args.size() == 3 && args[1] == "--fixture") {
         std::fputs("connec", stdout);
         std::fflush(stdout);
+        std::fputs("diagnostic\n", stderr);
+        std::fflush(stderr);
         QTimer::singleShot(20, [] {
             std::fputs("ted\n", stdout);
             std::fflush(stdout);

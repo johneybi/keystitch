@@ -44,13 +44,17 @@ void DesktopEngine::resetBackoff()
     delayMs_ = 1000;
 }
 
-void DesktopEngine::drain(QProcess* child, bool atEnd)
+void DesktopEngine::drain(QProcess* child, bool standardError, bool atEnd)
 {
-    // Preserve incomplete lines (including split UTF-8 characters) until the
-    // next read. A log consumer may stop or replace the child synchronously.
-    while (child_ == child && (child->canReadLine() || (atEnd && child->bytesAvailable()))) {
-        auto bytes = child->readLine();
-        if (bytes.endsWith('\n')) bytes.chop(1);
+    if (child != child_) return;
+    auto& tail = standardError ? stderrTail_ : stdoutTail_;
+    tail += standardError ? child->readAllStandardError() : child->readAllStandardOutput();
+    while (child == child_ && !tail.isEmpty()) {
+        const auto newline = tail.indexOf('\n');
+        if (newline < 0 && !atEnd) return;
+        const auto length = newline < 0 ? tail.size() : newline;
+        auto bytes = tail.left(length);
+        tail.remove(0, newline < 0 ? length : length + 1);
         if (bytes.endsWith('\r')) bytes.chop(1);
         Q_EMIT outputLine(QString::fromUtf8(bytes));
     }
@@ -60,11 +64,13 @@ void DesktopEngine::launch()
 {
     auto* child = new QProcess(this);
     child_ = child;
-    child->setProcessChannelMode(QProcess::MergedChannels);
+    stdoutTail_.clear();
+    stderrTail_.clear();
     connect(child, &QProcess::started, this, [this, child] {
         if (child_ == child) setState(State::Running);
     });
-    connect(child, &QProcess::readyRead, this, [this, child] { drain(child, false); });
+    connect(child, &QProcess::readyReadStandardOutput, this, [this, child] { drain(child, false, false); });
+    connect(child, &QProcess::readyReadStandardError, this, [this, child] { drain(child, true, false); });
     connect(child, &QProcess::errorOccurred, this, [this, child](QProcess::ProcessError error) {
         if (child != child_ || error != QProcess::FailedToStart) return;
         const QString message = child->errorString();
@@ -75,7 +81,8 @@ void DesktopEngine::launch()
     });
     connect(child, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this, child](int exitCode) {
-        drain(child, true);
+        drain(child, false, true);
+        drain(child, true, true);
         if (child != child_) return;
         child_ = nullptr;
         child->deleteLater();
