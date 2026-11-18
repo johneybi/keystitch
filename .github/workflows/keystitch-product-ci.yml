@@ -30,6 +30,7 @@ jobs:
         run: |
           python3 tools/release/test_audit_macos_bundle.py
           python3 tools/release/test_verify_build.py
+          python3 tools/release/test_build_metadata.py
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.10.3'
@@ -100,6 +101,8 @@ jobs:
           python tools/release/test_audit_macos_bundle.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/release/test_verify_build.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/release/test_build_metadata.py
       - name: Configure
         shell: pwsh
         env:

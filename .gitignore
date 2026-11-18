@@ -35,6 +35,9 @@ CMakeLists.txt.user
 .vscode/
 # Transient in-project-directory dependencies
 /deps/
+# aqtinstall writes this diagnostic log in the working directory, including
+# when install-qt-action restores Qt from cache. It is not product source.
+/aqtinstall.log
 /out/build/x64-Debug
 bundle
 compile_commands.json
