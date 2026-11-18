@@ -113,13 +113,50 @@ AGL을 참조하던 Qt 6.8.3 대신 AGL 의존성이 없는 Qt 6.10.3을 CI에 �
 검사했으며 설치·실행하지 않았다. 이 검사는 소스 provenance나 출시 서명을
 증명하지 않으므로 아래 1번 이정표가 전부 완료된 것은 아니다.
 
+## 동일 소스의 내부 배포 후보 생성 — 2026-11-18
+
+`f709f47c`는 실행 초기화 이전의 `--build-info`와 빌드 묶음 검사를 추가했다.
+`ac6a3ace`는 Mac 앱 ZIP과 Windows Inno EXE 생성·업로드를 CI에 연결했다.
+`ade651a1`은 Qt 설치 도구가 남기는 `aqtinstall.log`를 소스 변경 판정에서
+제외하고 실제 임시 Git 저장소로 metadata 갱신을 검증한다. 다른 untracked
+소스나 수정 파일은 계속 dirty이며, dirty 후보는 기본 거부한다.
+
+**코드 revision `ade651a12adf6d48b7d8d7399a76443f94ad88ce`의
+[CI 44243335394](https://github.com/johneybi/keystitch/actions/runs/44243335394)가
+두 OS 모두 성공했다.**
+
+| 산출물/검증 | 확인 결과 |
+| --- | --- |
+| Mac unit suites | 240 core + 6 desktop + 58 GUI = 304개 통과 |
+| Windows unit suites | 175 core + 6 desktop + 58 GUI = 239개 통과 |
+| 패키지·metadata 검사 | 각 OS에서 5 audit + 6 verifier + 4 Git fixture = 15개 통과 |
+| Mac 후보 | GUI/client/server 같은 build ID, clean revision, 19개 Mach-O 검사, ad-hoc 서명 검증, ZIP 업로드 |
+| Windows 후보 | GUI/client/server/daemon 같은 build ID, clean revision, 개발 Qt PATH 없이 probe, Inno 컴파일·EXE 업로드 |
+
+- [Mac 내부 후보 ZIP와 receipt](https://github.com/johneybi/keystitch/actions/runs/44243335394/artifacts/14400169199)
+- [Windows 내부 후보 EXE와 receipt](https://github.com/johneybi/keystitch/actions/runs/44243335394/artifacts/14400184706)
+
+두 artifact를 `build-product/candidates-ade651a1/`로 내려받아 ZIP/EXE SHA256을
+receipt와 대조했다. Mac ZIP 내부의 Info.plist·19개 Mach-O 해시도 일치했다.
+다운로드한 실행 파일이나 설치 프로그램은 실행하지 않았다.
+
+각 OS 안의 실행 파일들은 같은 build ID여야 하며 두 OS 사이에는 같은 소스
+revision을 사용한다. CI artifacts는 보존 기간이 있는 개발 산출물이고 정식
+Release가 아니다. 로컬 Qt 5에서도 별도 clean 후보의 50개 Mach-O와 서명을
+검사했다. `--build-info` 조회 외에 GUI/입력 엔진 일반 실행·설치는 하지 않았다.
+
+남은 제한: Mac 후보는 macOS 26 빌드이며 Developer ID/notarization 없음,
+Windows 설치 파일은 미서명·설치 미검증이다. Inno의 기존 관리자 설치와 HKCU
+처리 경고, 방화벽 정책, 자동 실행 이전·업그레이드는 설치 수용 단계에서 정리한다.
+전체 라이선스 묶음과 깨끗한 VM의 의존성/GUI 초기화 검증도 남아 있다.
+현재 사용자 앱·OS 한영 설정을 변경하지 않았다.
+
 ## 배포까지 남은 순서
 
 프론트 시각 디자인은 뒤에 교체할 수 있도록 다음 기능부터 완성한다.
 
-1. **일관된 빌드·패키지:** GUI/서버/클라이언트의 빌드 revision과 해시를 묶고,
-   실제 Mach-O·의존성 최소 OS와 plist를 대조한다. Windows도 같은 revision의
-   설치 파일을 만든다. CI 실행 결과와 artifact를 릴리스 후보에 연결한다.
+1. **일관된 빌드·패키지:** 위 CI에서 내부 후보 생성까지 확인했다. 다음에는
+   깨끗한 설치 환경의 실행·의존성 검증과 제3자 라이선스 묶음을 추가한다.
 2. **실행 상태 계층:** stopped/starting/connected/retrying/error, 실행 버전,
    저장/실행 설정 차이와 오류를 프론트와 독립적으로 노출한다. 프로세스 수명은
    한 소유자만 관리한다. 화면 교체 시 새로운 프로세스 제어를 중복 구현하지 않는다.
@@ -132,3 +169,34 @@ AGL을 참조하던 Qt 6.8.3 대신 AGL 의존성이 없는 Qt 6.10.3을 CI에 �
 
 현재는 1차 개발 기반이며 M0~M4 전체 완료가 아니다. 실제 입력·설치 수용과
 서명 계정이 필요한 단계는 그 환경을 확인한 뒤 진행한다.
+
+### 다음 구현: 화면과 실행 제어 분리
+
+현재 `MainWindow`가 QProcess, 재시도 타이머, 시작/중지, 로그 기반 연결 표시를
+모두 소유한다. `started server`도 CONNECTED로 처리하고, 프로세스 종료 후
+재시도를 예약할 때 연결 표시를 즉시 갱신하지 않는다. 이 상태를 그대로 QML로
+복제하면 화면마다 다른 실행·재시도 동작이 생긴다. 다음 구현의 경계는 아래다.
+이 절은 **설계이며 아직 추출을 완료했다는 뜻이 아니다.**
+
+- Qt Core 실행 controller 한 개가 desktop 프로세스와 재시도 타이머를 소유한다.
+  Widgets/QML/메뉴바·트레이는 start/stop/restart 명령과 상태 snapshot을 공유한다.
+  Windows service는 기존 IPC를 별도 transport로 연결하며 desktop process를
+  동시에 시작하지 않는다. 화면의 소멸을 엔진 소유권 변경과 동일시하지 않는다.
+- 프로세스 상태(`stopped/starting/running/stopping/retrying/error`)와 연결 상태
+  (`unknown/listening/connecting/connected/disconnected`)를 분리한다.
+  서버가 시작했다는 로그만으로 상대가 연결되었다고 표시하지 않는다.
+- 각 실행에 generation을 부여하고 이전 프로세스의 늦은 출력·종료·timer를
+  무시한다. stop은 예약된 재시도를 취소한다. 실행 실패는 오류로 남기며
+  무제한 실행 루프에 넣지 않는다. 비정상 종료 재시도는 단일 timer로 제한한다.
+- 실행에 사용한 불변 설정 snapshot과 저장된 설정 revision을 따로 노출한다.
+  저장 성공, 실행 반영, 상대 연결을 구분하고 변경은 명시적 restart 때 적용한다.
+  Mac 입력 소스 설정을 쓰거나 구름 입력기를 요구하는 동작은 넣지 않는다.
+- 현재 텍스트 로그 파싱은 경계 adapter로 격리하고 줄이 여러 read에 나뉘는
+  경우를 처리한다. 인증서 승인과 연결 상태를 섞지 않는다. 구조화된 engine
+  status를 도입하기 전까지 로그로 확인할 수 없는 상태는 unknown으로 둔다.
+
+검증은 대체 process/timer와 실제 무해한 fixture child를 사용한다. 중복 start,
+stop 중 exit, 실패한 launch, 재시도 중 설정 변경, 옛 generation 이벤트,
+분할 로그를 검증하며 실제 입력 공유 엔진을 시험 삼아 시작하지 않는다.
+첫 적용은 desktop transport부터 하고 Windows service 경로는 기존 동작과
+분리해 검증한 뒤 통합한다. 시각 디자인 변경은 이 계약 위에서 진행한다.
